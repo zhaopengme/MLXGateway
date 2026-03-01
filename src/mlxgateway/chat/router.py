@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ..models.cache import get_model_cache
 from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.logger import logger
-from ..vlm.utils import detect_multimodal_content
+from ..vlm.utils import detect_multimodal_content, is_vlm_model
 from .generator import ChatGenerator
 from .schema import (
     ChatCompletionChunk,
@@ -92,7 +92,19 @@ def _create_chunk(completion_id: str, created: int, model: str, content: str = "
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
         has_multimodal = _has_multimodal_content(request.messages)
+        model_is_vlm = is_vlm_model(request.model)
+        use_vlm_generator = model_is_vlm
         extra_params = request.get_extra_params()
+
+        if has_multimodal and not model_is_vlm:
+            return _create_error_response(
+                400,
+                "This request contains image/audio/video content, but the selected model "
+                "does not appear to be a VLM. Please use a VLM model for multimodal input.",
+                "invalid_request_error",
+                "model_not_supported_for_multimodal",
+                "model",
+            )
         
         def progress_callback(processed: int, total: int):
             progress_pct = (processed / total * 100) if total > 0 else 0
@@ -100,7 +112,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         
         # Get appropriate generator
         try:
-            if has_multimodal:
+            if use_vlm_generator:
                 generator = get_model_cache().get_vlm_generator(
                     request.model, extra_params.get("adapter_path")
                 )
@@ -117,7 +129,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         
         # Prepare messages and tools
         messages = [
-            {"role": msg.role, "content": msg.content if has_multimodal else msg.get_text_content()}
+            {"role": msg.role, "content": msg.content if use_vlm_generator else msg.get_text_content()}
             for msg in request.messages
         ]
         
@@ -136,7 +148,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
             "top_p": request.top_p or 1.0,
         }
         
-        if not has_multimodal:
+        if not use_vlm_generator:
             if tools:
                 gen_kwargs["tools"] = tools
             gen_kwargs["use_cache"] = request.enable_cache if request.enable_cache is not None else True
