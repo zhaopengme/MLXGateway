@@ -1,5 +1,6 @@
-import time
+import asyncio
 import tempfile
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -13,17 +14,15 @@ from .service import ImagesService
 
 router = APIRouter(tags=["images"])
 
+_service = ImagesService()
+
 
 @router.post("/images/generations")
 @router.post("/v1/images/generations")
 async def create_image(request: ImageGenerationRequest) -> ImageGenerationResponse:
-    """
-    Creates an image given a prompt.
-    """
     try:
         logger.info(f"Image generation request: model={request.model}, size={request.size}, n={request.n}")
-        service = ImagesService()
-        images = service.generate_images(request)
+        images = await asyncio.to_thread(_service.generate_images, request)
         
         return ImageGenerationResponse(
             created=int(time.time()), 
@@ -183,10 +182,8 @@ async def edit_image(
             **extra_params
         )
         
-        # Generate edited images
-        service = ImagesService()
-        images = service.edit_images(request)
-        
+        images = await asyncio.to_thread(_service.edit_images, request)
+
         return ImageGenerationResponse(
             created=int(time.time()), 
             data=images

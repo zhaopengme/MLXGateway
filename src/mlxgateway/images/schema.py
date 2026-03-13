@@ -17,17 +17,25 @@ class ResponseFormat(str, Enum):
     B64_JSON = "b64_json"
 
 
+class OutputFormat(str, Enum):
+    PNG = "png"
+    JPEG = "jpeg"
+    WEBP = "webp"
+
+
 class ImageGenerationRequest(BaseModel):
     prompt: str = Field(..., max_length=4000)
-    model: str = "black-forest-labs/FLUX.2-klein-9B"
+    model: str = "black-forest-labs/FLUX.2-klein-4B"
     n: int = Field(default=1, ge=1, le=10)
     response_format: ResponseFormat = ResponseFormat.B64_JSON
+    output_format: OutputFormat = OutputFormat.WEBP
+    quality: Optional[int] = Field(default=80, ge=1, le=100)
     size: ImageSize = ImageSize.S1024x1024
 
     model_config = {"extra": "allow"}
 
     def get_extra_params(self) -> Dict[str, Any]:
-        standard = {"prompt", "model", "n", "response_format", "size"}
+        standard = {"prompt", "model", "n", "response_format", "output_format", "quality", "size"}
         return {k: v for k, v in self.model_dump().items() if k not in standard}
 
 
