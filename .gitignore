@@ -40,3 +40,6 @@ Thumbs.db
 logs/
 *.log
 .venv/
+
+# Local scripts
+start.sh
