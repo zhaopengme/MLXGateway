@@ -34,6 +34,18 @@ async def create_speech(request: TTSRequest):
             },
         )
 
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message=str(e),
+                    type="invalid_request_error",
+                    code="invalid_parameter"
+                )
+            ).model_dump()
+        )
+
     except Exception as e:
         return JSONResponse(
             status_code=500,

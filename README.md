@@ -39,7 +39,7 @@ Server starts at `http://localhost:8008`
 ### Options
 
 ```bash
-mlxgateway --host 0.0.0.0 --port 8000 --log-level info --max-models 4 --model-cache-ttl 600
+mlxgateway --host 0.0.0.0 --port 8008 --log-level debug --max-models 4 --model-cache-ttl 600
 ```
 
 ## Thanks to

@@ -1,8 +1,10 @@
 import tempfile
+import threading
 from pathlib import Path
-from typing import Union
+from typing import Dict, Union
 
-from mlx_audio.stt import load_model
+import mlx.nn as nn
+from mlx_audio.stt import load as load_stt_model
 from mlx_audio.stt.generate import generate_transcription
 
 from ...utils.logger import logger
@@ -12,6 +14,29 @@ from .schema import (
     TranscriptionResponse,
     TranscriptionWord,
 )
+
+_stt_cache: Dict[str, nn.Module] = {}
+_stt_cache_lock = threading.Lock()
+_MAX_STT_MODELS = 4
+
+
+def _get_or_load_stt_model(model_id: str) -> nn.Module:
+    with _stt_cache_lock:
+        if model_id in _stt_cache:
+            logger.debug(f"STT model cache hit: {model_id}")
+            return _stt_cache[model_id]
+
+    logger.info(f"Loading STT model: {model_id}")
+    model = load_stt_model(model_id)
+
+    with _stt_cache_lock:
+        if len(_stt_cache) >= _MAX_STT_MODELS and model_id not in _stt_cache:
+            oldest_key = next(iter(_stt_cache))
+            _stt_cache.pop(oldest_key)
+            logger.info(f"STT cache evicted: {oldest_key}")
+        _stt_cache[model_id] = model
+
+    return model
 
 
 class STTService:
@@ -72,12 +97,9 @@ class STTService:
         try:
             logger.info(f"STT input - model: {request.model}, file: {request.file.filename}, language: {request.language}, temp: {request.temperature}")
             audio_path = await self._save_upload_file(request.file)
-            
-            # Load model
-            logger.info(f"Loading STT model: {request.model}")
-            model = load_model(request.model)
-            
-            # Generate transcription (Qwen3-ASR expects language when given, not None)
+
+            model = _get_or_load_stt_model(request.model)
+
             logger.info(f"Transcribing audio: {audio_path}")
             gen_kwargs = {
                 "temperature": request.temperature,
@@ -92,16 +114,15 @@ class STTService:
                 audio=audio_path,
                 **gen_kwargs,
             )
-            
-            # Convert STTOutput to dict format
+
             result_dict = {
                 "text": result.text,
                 "language": result.language or "en",
                 "segments": result.segments or [],
             }
-            
+
             logger.info(f"STT output - text: {result.text}, language: {result.language or 'en'}, segments: {len(result.segments or [])}")
-            
+
             response = self._format_response(result_dict, request)
             Path(audio_path).unlink(missing_ok=True)
             return response
