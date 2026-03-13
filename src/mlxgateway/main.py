@@ -12,6 +12,7 @@ from .audio.tts.router import router as tts_router
 from .chat.router import router as chat_router
 from .config import Config, set_config
 from .images.router import router as images_router
+from .middleware.auth import APIKeyAuthMiddleware
 from .middleware.logging import RequestResponseLoggingMiddleware
 from .models.router import router as models_router
 from .utils.logger import logger, set_logger_level
@@ -77,6 +78,12 @@ def build_parser():
         default=600,
         help="Model list cache TTL in seconds (default: 600)",
     )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="API key for authentication (env: API_KEY). If not set, no auth required.",
+    )
     return parser
 
 
@@ -93,14 +100,19 @@ def start():
         model_cache_ttl=args.model_cache_ttl,
         max_models=args.max_models,
         model_list_cache_ttl=args.model_list_cache,
+        api_key=args.api_key,
     )
     set_config(config)
+
+    if config.api_key:
+        app.add_middleware(APIKeyAuthMiddleware, api_key=config.api_key)
 
     set_logger_level(logger, config.log_level)
 
     logger.info(f"Starting MLX Gateway on {config.host}:{config.port}")
     logger.info(f"Model cache: max_size={config.max_models}, ttl={config.model_cache_ttl}s")
     logger.info(f"Model list cache: ttl={config.model_list_cache_ttl}s")
+    logger.info(f"API key auth: {'enabled' if config.api_key else 'disabled'}")
 
     uvicorn.run(
         "mlxgateway.main:app",
