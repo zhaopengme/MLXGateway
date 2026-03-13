@@ -41,5 +41,6 @@ logs/
 *.log
 .venv/
 
-# Local scripts
+# Local scripts & data
 start.sh
+ref/

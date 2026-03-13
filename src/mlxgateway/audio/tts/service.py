@@ -1,16 +1,21 @@
+import inspect
 import io
 import threading
 import time
 import wave
+from pathlib import Path
 from typing import Dict, Optional
 
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 from mlx_audio.tts import load as load_tts_model
+from mlx_audio.utils import load_audio
 
 from ...utils.logger import logger
 from .schema import AudioFormat, TTSRequest
+
+_REF_AUDIO_DIR = Path(__file__).resolve().parents[4] / "ref"
 
 _SUPPORTED_FORMATS = {AudioFormat.WAV, AudioFormat.MP3, AudioFormat.FLAC, AudioFormat.PCM}
 
@@ -90,6 +95,17 @@ class TTSService:
                 "instruct": instruct,
             }
             gen_kwargs.update(request.get_extra_params() or {})
+
+            if "ref_audio" in inspect.signature(model.generate).parameters:
+                ref_path = _REF_AUDIO_DIR / "me.ogg"
+                if ref_path.exists() and "ref_audio" not in gen_kwargs:
+                    normalize = getattr(model, "model_type", "") == "spark"
+                    gen_kwargs["ref_audio"] = load_audio(
+                        str(ref_path),
+                        sample_rate=getattr(model, "sample_rate", 24000),
+                        volume_normalize=normalize,
+                    )
+                    logger.info(f"Voice cloning with ref audio: {ref_path}")
 
             logger.info(f"Generating audio - instruct: {instruct!r}, voice: {voice!r}")
 
