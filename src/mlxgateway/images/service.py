@@ -13,7 +13,8 @@ from .schema import ImageEditRequest, ImageGenerationRequest, ImageObject, Respo
 
 
 def _normalize_model_name(name: str) -> str:
-    return name.replace("flux.1", "flux1").replace("flux.2", "flux2").lower()
+    lowered = name.lower()
+    return lowered.replace("flux.1", "flux1").replace("flux.2", "flux2")
 
 
 def _resolve_model_class(model_version: str):
@@ -101,8 +102,10 @@ def _pil_to_b64(pil_image, fmt: str = "JPEG", quality: int = 85) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Module-level generator / editor cache (persists across requests)
+# Module-level generator / editor cache (persists across requests, FIFO eviction)
 # ---------------------------------------------------------------------------
+_MAX_IMAGE_MODELS = 2
+
 _gen_cache: Dict[str, object] = {}
 _edit_cache: Dict[str, object] = {}
 _cache_lock = threading.Lock()
@@ -115,6 +118,13 @@ def _get_model_lock(key: str) -> threading.Lock:
         if key not in _model_locks:
             _model_locks[key] = threading.Lock()
         return _model_locks[key]
+
+
+def _evict_oldest(cache: Dict[str, object], label: str) -> None:
+    if len(cache) >= _MAX_IMAGE_MODELS:
+        oldest = next(iter(cache))
+        cache.pop(oldest)
+        logger.info(f"Image {label} cache evicted: {oldest}")
 
 
 def _get_or_create_generator(model_version: str, params: dict):
@@ -134,6 +144,7 @@ def _get_or_create_generator(model_version: str, params: dict):
         logger.info(f"Model loaded: {type(gen).__name__}")
 
         with _cache_lock:
+            _evict_oldest(_gen_cache, "generator")
             _gen_cache[model_version] = gen
         return gen
 
@@ -155,6 +166,7 @@ def _get_or_create_editor(model_version: str, params: dict):
         logger.info(f"Edit model loaded: {type(editor).__name__}")
 
         with _cache_lock:
+            _evict_oldest(_edit_cache, "editor")
             _edit_cache[model_version] = editor
         return editor
 

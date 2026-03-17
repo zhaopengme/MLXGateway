@@ -42,6 +42,47 @@ Server starts at `http://localhost:8008`
 mlxgateway --host 0.0.0.0 --port 8008 --log-level debug --max-models 4 --model-cache-ttl 600
 ```
 
+## API Examples
+
+### Chat Completions
+
+```bash
+curl http://localhost:8008/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": false
+  }'
+```
+
+### Text-to-Speech
+
+```bash
+curl -X POST http://localhost:8008/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16",
+    "input": "Hello, this is a speech synthesis test.",
+    "voice": "Serena",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+### Image Generation
+
+```bash
+curl -X POST http://localhost:8008/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "black-forest-labs/FLUX.2-klein-4B",
+    "prompt": "a cat sitting on a desk, studio lighting",
+    "size": "1024x1024"
+  }' \
+  --output response.json
+```
+
 ## Thanks to
 
 - [mlx-lm](https://github.com/ml-explore/mlx-lm) - Language models
