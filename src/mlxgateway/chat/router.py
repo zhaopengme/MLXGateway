@@ -156,8 +156,18 @@ async def create_chat_completion(request: ChatCompletionRequest):
         
         # Non-streaming response
         if not request.stream:
+            t0 = time.perf_counter()
             result = generator.generate(**gen_kwargs)
+            elapsed = time.perf_counter() - t0
             tool_calls = _parse_tool_calls(result.get("tool_calls"))
+            
+            prompt_toks = result["prompt_tokens"]
+            completion_toks = result["completion_tokens"]
+            tps = completion_toks / elapsed if elapsed > 0 else 0
+            logger.info(
+                f"[{request.model}] prompt={prompt_toks} completion={completion_toks} "
+                f"time={elapsed:.2f}s speed={tps:.1f} tok/s"
+            )
             
             return JSONResponse(content=ChatCompletionResponse(
                 id=completion_id,
@@ -174,15 +184,22 @@ async def create_chat_completion(request: ChatCompletionRequest):
                     finish_reason="tool_calls" if tool_calls else "stop",
                 )],
                 usage=ChatCompletionUsage(
-                    prompt_tokens=result["prompt_tokens"],
-                    completion_tokens=result["completion_tokens"],
-                    total_tokens=result["prompt_tokens"] + result["completion_tokens"],
+                    prompt_tokens=prompt_toks,
+                    completion_tokens=completion_toks,
+                    total_tokens=prompt_toks + completion_toks,
                 ),
             ).model_dump(exclude_none=True))
         
         # Streaming response
         async def event_generator():
+            t0 = time.perf_counter()
+            ttft = None
+            prompt_toks = completion_toks = 0
             for response in generator.generate_stream(**gen_kwargs):
+                if ttft is None and (response['text'] or response.get('reasoning')):
+                    ttft = time.perf_counter() - t0
+                prompt_toks = response.get('prompt_tokens', prompt_toks)
+                completion_toks = response.get('completion_tokens', completion_toks)
                 yield _create_chunk(
                     completion_id, created, request.model,
                     response['text'], response.get('reasoning'),
@@ -191,6 +208,15 @@ async def create_chat_completion(request: ChatCompletionRequest):
                 )
                 if response['finish_reason']:
                     break
+            
+            elapsed = time.perf_counter() - t0
+            gen_time = elapsed - (ttft or 0)
+            tps = completion_toks / gen_time if gen_time > 0 else 0
+            ttft_str = f"{ttft:.2f}s" if ttft is not None else "N/A"
+            logger.info(
+                f"[{request.model}] prompt={prompt_toks} completion={completion_toks} "
+                f"ttft={ttft_str} gen={gen_time:.2f}s total={elapsed:.2f}s speed={tps:.1f} tok/s"
+            )
             yield "data: [DONE]\n\n"
         
         return StreamingResponse(

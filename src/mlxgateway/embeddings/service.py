@@ -1,0 +1,61 @@
+import threading
+from typing import Dict, List, Optional, Tuple
+
+import mlx.core as mx
+from mlx_embeddings.utils import load
+
+from ..utils.logger import logger
+
+_cache: Dict[str, Tuple] = {}
+_lock = threading.Lock()
+_MAX_CACHE = 2
+
+
+def _get_model(model_id: str):
+    with _lock:
+        if model_id in _cache:
+            return _cache[model_id]
+
+    logger.info(f"Loading embedding model: {model_id}")
+    model, tokenizer = load(model_id)
+    logger.info(f"Embedding model loaded: {model_id}")
+
+    with _lock:
+        if model_id in _cache:
+            return _cache[model_id]
+        if len(_cache) >= _MAX_CACHE:
+            evict_key = next(iter(_cache))
+            del _cache[evict_key]
+            logger.info(f"Evicted embedding model: {evict_key}")
+        _cache[model_id] = (model, tokenizer)
+    return model, tokenizer
+
+
+def generate_embeddings(
+    model_id: str,
+    texts: List[str],
+) -> Tuple[List[List[float]], int]:
+    """Generate embeddings for a list of texts.
+    
+    Returns (embeddings_list, total_tokens).
+    """
+    model, tokenizer = _get_model(model_id)
+
+    if len(texts) == 1:
+        inputs = tokenizer.encode(texts[0], return_tensors="mlx")
+        total_tokens = inputs.size
+        outputs = model(inputs)
+    else:
+        inputs = tokenizer.batch_encode_plus(
+            texts, return_tensors="mlx", padding=True, truncation=True, max_length=512
+        )
+        total_tokens = inputs["input_ids"].size
+        outputs = model(
+            inputs["input_ids"],
+            attention_mask=inputs.get("attention_mask"),
+        )
+
+    embeddings = outputs.text_embeds
+    mx.eval(embeddings)
+
+    return embeddings.tolist(), int(total_tokens)
