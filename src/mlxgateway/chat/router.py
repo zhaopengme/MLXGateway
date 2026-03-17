@@ -4,7 +4,7 @@ import time
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..models.cache import get_model_cache
@@ -91,7 +91,7 @@ def _create_chunk(completion_id: str, created: int, model: str, content: str = "
 
 
 @router.post("/chat/completions")
-async def create_chat_completion(request: ChatCompletionRequest):
+async def create_chat_completion(request: ChatCompletionRequest, http_request: Request):
     try:
         has_multimodal = _has_multimodal_content(request.messages)
         model_is_vlm = is_vlm_model(request.model)
@@ -200,7 +200,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
             prompt_toks = completion_toks = 0
             async with gpu_inference():
                 for response in generator.generate_stream(**gen_kwargs):
-                    if await request.is_disconnected():
+                    if await http_request.is_disconnected():
                         logger.info(f"[{request.model}] Client disconnected, stopping generation")
                         break
                     if ttft is None and (response['text'] or response.get('reasoning')):

@@ -52,7 +52,7 @@ curl http://localhost:8008/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
-    "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
+    "model": "mlx-community/MiroThinker-1.7-mini-mlx-4Bit",
     "messages": [{"role": "user", "content": "Hello!"}],
     "stream": true
   }'
