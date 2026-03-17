@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, UploadFile, Request
 from fastapi.responses import JSONResponse
 
 from ..models.error import ErrorDetail, ErrorResponse
+from ..utils.gpu import gpu_inference
 from ..utils.logger import logger
 from .schema import ImageEditRequest, ImageGenerationRequest, ImageGenerationResponse, ResponseFormat
 from .service import ImagesService
@@ -22,13 +23,25 @@ _service = ImagesService()
 async def create_image(request: ImageGenerationRequest) -> ImageGenerationResponse:
     try:
         logger.info(f"Image generation request: model={request.model}, size={request.size}, n={request.n}")
-        images = await asyncio.to_thread(_service.generate_images, request)
+        async with gpu_inference():
+            images = await asyncio.to_thread(_service.generate_images, request)
         
         return ImageGenerationResponse(
             created=int(time.time()), 
             data=images
         )
 
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=503,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message="Server is busy. Request timed out waiting for GPU resources.",
+                    type="server_error",
+                    code="timeout",
+                )
+            ).model_dump(),
+        )
     except ValueError as ve:
         logger.error(f"Validation error: {ve}")
         return JSONResponse(
@@ -182,13 +195,25 @@ async def edit_image(
             **extra_params
         )
         
-        images = await asyncio.to_thread(_service.edit_images, request)
+        async with gpu_inference():
+            images = await asyncio.to_thread(_service.edit_images, request)
 
         return ImageGenerationResponse(
             created=int(time.time()), 
             data=images
         )
     
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=503,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message="Server is busy. Request timed out waiting for GPU resources.",
+                    type="server_error",
+                    code="timeout",
+                )
+            ).model_dump(),
+        )
     except ValueError as ve:
         logger.error(f"Validation error: {ve}")
         return JSONResponse(

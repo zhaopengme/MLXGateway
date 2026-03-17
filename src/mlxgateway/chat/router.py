@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import uuid
@@ -8,6 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..models.cache import get_model_cache
 from ..models.error import ErrorDetail, ErrorResponse
+from ..utils.gpu import gpu_inference
 from ..utils.logger import logger
 from ..vlm.utils import detect_multimodal_content, is_vlm_model
 from .generator import ChatGenerator
@@ -157,7 +159,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
         # Non-streaming response
         if not request.stream:
             t0 = time.perf_counter()
-            result = generator.generate(**gen_kwargs)
+            async with gpu_inference():
+                result = generator.generate(**gen_kwargs)
             elapsed = time.perf_counter() - t0
             tool_calls = _parse_tool_calls(result.get("tool_calls"))
             
@@ -195,22 +198,23 @@ async def create_chat_completion(request: ChatCompletionRequest):
             t0 = time.perf_counter()
             ttft = None
             prompt_toks = completion_toks = 0
-            for response in generator.generate_stream(**gen_kwargs):
-                if await request.is_disconnected():
-                    logger.info(f"[{request.model}] Client disconnected, stopping generation")
-                    break
-                if ttft is None and (response['text'] or response.get('reasoning')):
-                    ttft = time.perf_counter() - t0
-                prompt_toks = response.get('prompt_tokens', prompt_toks)
-                completion_toks = response.get('completion_tokens', completion_toks)
-                yield _create_chunk(
-                    completion_id, created, request.model,
-                    response['text'], response.get('reasoning'),
-                    _parse_tool_calls(response.get("tool_calls")),
-                    response['finish_reason']
-                )
-                if response['finish_reason']:
-                    break
+            async with gpu_inference():
+                for response in generator.generate_stream(**gen_kwargs):
+                    if await request.is_disconnected():
+                        logger.info(f"[{request.model}] Client disconnected, stopping generation")
+                        break
+                    if ttft is None and (response['text'] or response.get('reasoning')):
+                        ttft = time.perf_counter() - t0
+                    prompt_toks = response.get('prompt_tokens', prompt_toks)
+                    completion_toks = response.get('completion_tokens', completion_toks)
+                    yield _create_chunk(
+                        completion_id, created, request.model,
+                        response['text'], response.get('reasoning'),
+                        _parse_tool_calls(response.get("tool_calls")),
+                        response['finish_reason']
+                    )
+                    if response['finish_reason']:
+                        break
             
             elapsed = time.perf_counter() - t0
             gen_time = elapsed - (ttft or 0)
@@ -228,6 +232,13 @@ async def create_chat_completion(request: ChatCompletionRequest):
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
     
+    except asyncio.TimeoutError:
+        return _create_error_response(
+            503,
+            "Server is busy. Request timed out waiting for GPU resources.",
+            "server_error",
+            "timeout",
+        )
     except ValueError as e:
         return _create_error_response(400, str(e), "invalid_request_error", "invalid_value")
     except Exception as e:

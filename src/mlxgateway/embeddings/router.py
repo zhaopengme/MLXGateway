@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ..models.error import ErrorDetail, ErrorResponse
+from ..utils.gpu import gpu_inference
 from ..utils.logger import logger
 from .schema import EmbeddingData, EmbeddingRequest, EmbeddingResponse, EmbeddingUsage
 from .service import generate_embeddings
@@ -33,9 +34,10 @@ async def create_embeddings(request: EmbeddingRequest):
             return _error(400, "Input must not be empty.", "invalid_value", "input")
 
         t0 = time.perf_counter()
-        embeddings, total_tokens = await asyncio.to_thread(
-            generate_embeddings, request.model, texts
-        )
+        async with gpu_inference():
+            embeddings, total_tokens = await asyncio.to_thread(
+                generate_embeddings, request.model, texts
+            )
         elapsed = time.perf_counter() - t0
 
         dim = len(embeddings[0]) if embeddings else 0
@@ -56,6 +58,17 @@ async def create_embeddings(request: EmbeddingRequest):
             ),
         ).model_dump()
 
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=503,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message="Server is busy. Request timed out waiting for GPU resources.",
+                    type="server_error",
+                    code="timeout",
+                )
+            ).model_dump(),
+        )
     except Exception as e:
         logger.error(f"Embedding error: {e}", exc_info=True)
         error_msg = str(e)

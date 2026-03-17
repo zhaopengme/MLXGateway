@@ -1,6 +1,8 @@
 import argparse
 import os
 
+from contextlib import asynccontextmanager
+
 import setproctitle
 import uvicorn
 from fastapi import FastAPI, Request, status
@@ -17,9 +19,16 @@ from .images.router import router as images_router
 from .middleware.auth import APIKeyAuthMiddleware
 from .middleware.logging import RequestResponseLoggingMiddleware
 from .models.router import router as models_router
+from .utils.gpu import get_gpu_semaphore
 from .utils.logger import logger, set_logger_level
 
-app = FastAPI(title="MLX Gateway")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize GPU semaphore on startup to avoid edge cases
+    get_gpu_semaphore()
+    yield
+
+app = FastAPI(title="MLX Gateway", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -98,6 +107,18 @@ def build_parser():
         default=None,
         help="API key for authentication (env: API_KEY). If not set, no auth required.",
     )
+    parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=1,
+        help="Maximum concurrent GPU inference requests (default: 1)",
+    )
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=300,
+        help="Timeout in seconds for requests waiting to acquire GPU (default: 300)",
+    )
     return parser
 
 
@@ -115,6 +136,8 @@ def start():
         max_models=args.max_models,
         model_list_cache_ttl=args.model_list_cache,
         api_key=args.api_key,
+        max_concurrent=args.max_concurrent,
+        request_timeout=args.request_timeout,
     )
     set_config(config)
 
@@ -127,6 +150,7 @@ def start():
     logger.info(f"Model cache: max_size={config.max_models}, ttl={config.model_cache_ttl}s")
     logger.info(f"Model list cache: ttl={config.model_list_cache_ttl}s")
     logger.info(f"API key auth: {'enabled' if config.api_key else 'disabled'}")
+    logger.info(f"GPU concurrency: max_concurrent={config.max_concurrent}, request_timeout={config.request_timeout}s")
 
     uvicorn.run(
         "mlxgateway.main:app",

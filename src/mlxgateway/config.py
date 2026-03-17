@@ -17,6 +17,10 @@ class Config:
     default_max_kv_size: Optional[int]
     enable_cache_by_default: bool
 
+    # GPU concurrency
+    max_concurrent: int
+    request_timeout: int
+
     @classmethod
     def from_env(
         cls,
@@ -29,9 +33,17 @@ class Config:
         api_key: Optional[str] = None,
         default_max_kv_size: Optional[int] = None,
         enable_cache_by_default: Optional[bool] = None,
+        max_concurrent: Optional[int] = None,
+        request_timeout: Optional[int] = None,
     ) -> "Config":
         env_enable_cache = os.getenv("ENABLE_CACHE", "true").lower()
         parsed_enable_cache = env_enable_cache in ("true", "1", "yes")
+
+        # GPU concurrency
+        if max_concurrent is not None and max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
+        if request_timeout is not None and request_timeout < 0:
+            raise ValueError("request_timeout must be >= 0")
 
         return cls(
             host=host or os.getenv("HOST", "127.0.0.1"),
@@ -45,6 +57,8 @@ class Config:
             default_max_kv_size=default_max_kv_size
             or (int(os.getenv("DEFAULT_MAX_KV_SIZE")) if os.getenv("DEFAULT_MAX_KV_SIZE") else None),
             enable_cache_by_default=enable_cache_by_default if enable_cache_by_default is not None else parsed_enable_cache,
+            max_concurrent=max_concurrent or int(os.getenv("MAX_CONCURRENT", "1")),
+            request_timeout=request_timeout or int(os.getenv("REQUEST_TIMEOUT", "300")),
         )
 
 

@@ -1,9 +1,11 @@
+import asyncio
 import io
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...models.error import ErrorDetail, ErrorResponse
+from ...utils.gpu import gpu_inference
 from .schema import AudioFormat, TTSRequest
 from .service import TTSService
 
@@ -15,7 +17,8 @@ async def create_speech(request: TTSRequest):
     tts_service = TTSService(request.model)
 
     try:
-        audio_content = await tts_service.generate_speech(request=request)
+        async with gpu_inference():
+            audio_content = await tts_service.generate_speech(request=request)
 
         content_type_mapping = {
             AudioFormat.MP3: "audio/mpeg",
@@ -34,6 +37,17 @@ async def create_speech(request: TTSRequest):
             },
         )
 
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=503,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message="Server is busy. Request timed out waiting for GPU resources.",
+                    type="server_error",
+                    code="timeout",
+                )
+            ).model_dump(),
+        )
     except ValueError as e:
         return JSONResponse(
             status_code=400,
@@ -45,7 +59,6 @@ async def create_speech(request: TTSRequest):
                 )
             ).model_dump()
         )
-
     except Exception as e:
         return JSONResponse(
             status_code=500,

@@ -1,8 +1,11 @@
+import asyncio
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from starlette.responses import PlainTextResponse
 
 from ...models.error import ErrorDetail, ErrorResponse
+from ...utils.gpu import gpu_inference
 from ...utils.logger import logger
 from .schema import ResponseFormat, STTRequestForm, TranscriptionResponse
 from .service import STTService
@@ -14,10 +17,22 @@ router = APIRouter(prefix="/v1", tags=["speech-to-text"])
 async def create_transcription(request: STTRequestForm = Depends()):
     stt_service = STTService()
     try:
-        result = await stt_service.transcribe(request)
+        async with gpu_inference():
+            result = await stt_service.transcribe(request)
         if request.response_format == ResponseFormat.TEXT:
             return PlainTextResponse(content=result)
         return JSONResponse(content=result)
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=503,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message="Server is busy. Request timed out waiting for GPU resources.",
+                    type="server_error",
+                    code="timeout",
+                )
+            ).model_dump(),
+        )
     except Exception as e:
         logger.exception("STT transcription failed: %s", e)
         return JSONResponse(
