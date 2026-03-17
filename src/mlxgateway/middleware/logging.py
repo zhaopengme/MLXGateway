@@ -20,32 +20,64 @@ def format_body(body: str) -> str:
 class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         body = await self._get_request_body(request)
-        
-        try:
-            body_json = json.loads(body)
-            if body_json.get("stream", False):
-                start_time = time.time()
-                response = await call_next(request)
-                process_time = time.time() - start_time
-
-                logger.debug(
-                    f"First Stream Response took {process_time:.2f}s:\n"
-                    f"Status: {response.status_code}\n"
-                )
-                return response
-        except json.JSONDecodeError:
-            pass
-
         request_id = uuid.uuid4().hex[:8]
 
-        logger.debug(
+        logger.info(
             f"Request [{request_id}]: {request.method} {request.url}\n"
             f"Body:\n{format_body(body)}",
         )
 
+        is_stream = False
+        try:
+            body_json = json.loads(body)
+            if body_json.get("stream", False):
+                is_stream = True
+        except json.JSONDecodeError:
+            pass
+
         start_time = time.time()
         response = await call_next(request)
         process_time = time.time() - start_time
+
+        if is_stream:
+            logger.info(
+                f"First Stream Response [{request_id}] took {process_time:.2f}s:\n"
+                f"Status: {response.status_code}\n"
+            )
+
+            # Wrapper for stream response
+            async def stream_wrapper(iterator):
+                full_body = b""
+                async for chunk in iterator:
+                    full_body += chunk
+                    yield chunk
+
+                try:
+                    body_text = full_body.decode()
+                    formatted_text = ""
+                    for line in body_text.splitlines():
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data != "[DONE]":
+                                try:
+                                    parsed = json.loads(data)
+                                    formatted_text += json.dumps(parsed, indent=2, ensure_ascii=False) + "\n"
+                                except json.JSONDecodeError:
+                                    formatted_text += line + "\n"
+                            else:
+                                formatted_text += line + "\n"
+                        elif line:
+                            formatted_text += line + "\n"
+                            
+                    logger.info(
+                        f"Stream Output Finished [{request_id}]:\n"
+                        f"{formatted_text.strip()}"
+                    )
+                except Exception as e:
+                    logger.info(f"Stream Output Finished [{request_id}] (Parse error: {e})")
+
+            response.body_iterator = stream_wrapper(response.body_iterator)
+            return response
 
         response_body = b""
         async for chunk in response.body_iterator:
@@ -62,7 +94,7 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
         except UnicodeDecodeError:
             body_text = "<Binary Content>"
 
-        logger.debug(
+        logger.info(
             f"Response [{request_id}] took {process_time:.2f}s:\n"
             f"Status: {response.status_code}\n"
             f"Body:\n{body_text}",
