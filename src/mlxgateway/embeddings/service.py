@@ -1,3 +1,4 @@
+import gc
 import threading
 from typing import Dict, List, Optional, Tuple
 
@@ -26,6 +27,8 @@ def _get_model(model_id: str):
         if len(_cache) >= _MAX_CACHE:
             evict_key = next(iter(_cache))
             del _cache[evict_key]
+            mx.clear_cache()
+            gc.collect()
             logger.info(f"Evicted embedding model: {evict_key}")
         _cache[model_id] = (model, tokenizer)
     return model, tokenizer

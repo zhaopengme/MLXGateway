@@ -5,6 +5,7 @@ import setproctitle
 import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .audio.stt.router import router as stt_router
@@ -20,7 +21,18 @@ from .utils.logger import logger, set_logger_level
 
 app = FastAPI(title="MLX Gateway")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(RequestResponseLoggingMiddleware)
+
+
+@app.get("/health", tags=["health"])
+async def health():
+    return {"status": "ok"}
 
 
 @app.exception_handler(RequestValidationError)

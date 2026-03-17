@@ -49,7 +49,7 @@ class VLMGenerator:
             logger.error(f"Failed to download from URL {url}: {e}")
             return None
     
-    def _extract_media_from_messages(self, messages: List[Dict]) -> Dict[str, List[str]]:
+    def _extract_media_from_messages(self, messages: List[Dict]):
         """
         Extract images, audio, and video from messages.
         
@@ -57,13 +57,15 @@ class VLMGenerator:
             messages: List of chat messages with content
             
         Returns:
-            Dict with 'images', 'audio', 'video' lists
+            Tuple of (media dict with 'images'/'audio'/'video' lists,
+                      temp_paths list of downloaded temp file paths to clean up)
         """
         media = {
             "images": [],
             "audio": [],
             "video": [],
         }
+        temp_paths: List[str] = []
         
         for msg in messages:
             content = msg.get("content")
@@ -80,11 +82,11 @@ class VLMGenerator:
                 if item_type == "image_url":
                     url = item.get("image_url", {}).get("url", "")
                     if url:
-                        # Download if URL, otherwise assume local path
                         if self._is_url(url):
                             local_path = self._download_from_url(url)
                             if local_path:
                                 media["images"].append(local_path)
+                                temp_paths.append(local_path)
                         else:
                             media["images"].append(url)
                 
@@ -96,6 +98,7 @@ class VLMGenerator:
                             local_path = self._download_from_url(audio_path)
                             if local_path:
                                 media["audio"].append(local_path)
+                                temp_paths.append(local_path)
                         else:
                             media["audio"].append(audio_path)
                 
@@ -107,10 +110,11 @@ class VLMGenerator:
                             local_path = self._download_from_url(video_path)
                             if local_path:
                                 media["video"].append(local_path)
+                                temp_paths.append(local_path)
                         else:
                             media["video"].append(video_path)
         
-        return media
+        return media, temp_paths
     
     def _build_text_prompt(self, messages: List[Dict]) -> str:
         """
@@ -199,7 +203,7 @@ class VLMGenerator:
             Dict with 'text', 'prompt_tokens', 'completion_tokens'
         """
         # Extract media from messages
-        media = self._extract_media_from_messages(messages)
+        media, temp_paths = self._extract_media_from_messages(messages)
         
         # Build text prompt
         prompt = self._build_text_prompt(messages)
@@ -255,6 +259,12 @@ class VLMGenerator:
         except Exception as e:
             logger.error(f"VLM generation failed: {e}", exc_info=True)
             raise
+        finally:
+            for path in temp_paths:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
     
     def generate_stream(
         self,
@@ -270,7 +280,7 @@ class VLMGenerator:
         Yields dicts compatible with chat router: text, reasoning, tool_calls,
         finish_reason, prompt_tokens, completion_tokens.
         """
-        media = self._extract_media_from_messages(messages)
+        media, temp_paths = self._extract_media_from_messages(messages)
         prompt = self._build_text_prompt(messages)
         num_images = len(media["images"])
         num_audios = len(media["audio"])
@@ -321,3 +331,9 @@ class VLMGenerator:
         except Exception as e:
             logger.error(f"VLM stream generation failed: {e}", exc_info=True)
             raise
+        finally:
+            for path in temp_paths:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass

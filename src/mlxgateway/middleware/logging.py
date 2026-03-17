@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 from typing import Callable
 
 from fastapi import Request, Response
@@ -35,7 +36,7 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
         except json.JSONDecodeError:
             pass
 
-        request_id = str(time.time())
+        request_id = uuid.uuid4().hex[:8]
 
         logger.debug(
             f"Request [{request_id}]: {request.method} {request.url}\n"

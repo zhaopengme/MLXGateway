@@ -57,7 +57,7 @@ class LLMScanner(ModelScanner):
             
             arch = importlib.import_module(f"mlx_lm.models.{model_type}")
             return hasattr(arch, "Model") and hasattr(arch, "ModelArgs")
-        except:
+        except Exception:
             return False
 
 

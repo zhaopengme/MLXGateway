@@ -1,3 +1,4 @@
+import gc
 import inspect
 import io
 import threading
@@ -37,6 +38,8 @@ def _get_or_load_tts_model(model_id: str) -> nn.Module:
         if len(_tts_cache) >= _MAX_TTS_MODELS and model_id not in _tts_cache:
             oldest_key = next(iter(_tts_cache))
             _tts_cache.pop(oldest_key)
+            mx.clear_cache()
+            gc.collect()
             logger.info(f"TTS cache evicted: {oldest_key}")
         _tts_cache[model_id] = model
 

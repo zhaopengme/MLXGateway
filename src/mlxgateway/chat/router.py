@@ -196,6 +196,9 @@ async def create_chat_completion(request: ChatCompletionRequest):
             ttft = None
             prompt_toks = completion_toks = 0
             for response in generator.generate_stream(**gen_kwargs):
+                if await request.is_disconnected():
+                    logger.info(f"[{request.model}] Client disconnected, stopping generation")
+                    break
                 if ttft is None and (response['text'] or response.get('reasoning')):
                     ttft = time.perf_counter() - t0
                 prompt_toks = response.get('prompt_tokens', prompt_toks)

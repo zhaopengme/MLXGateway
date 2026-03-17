@@ -1,8 +1,10 @@
+import gc
 import tempfile
 import threading
 from pathlib import Path
 from typing import Dict, Union
 
+import mlx.core as mx
 import mlx.nn as nn
 from mlx_audio.stt import load as load_stt_model
 from mlx_audio.stt.generate import generate_transcription
@@ -33,6 +35,8 @@ def _get_or_load_stt_model(model_id: str) -> nn.Module:
         if len(_stt_cache) >= _MAX_STT_MODELS and model_id not in _stt_cache:
             oldest_key = next(iter(_stt_cache))
             _stt_cache.pop(oldest_key)
+            mx.clear_cache()
+            gc.collect()
             logger.info(f"STT cache evicted: {oldest_key}")
         _stt_cache[model_id] = model
 

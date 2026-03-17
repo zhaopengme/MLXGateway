@@ -62,7 +62,9 @@ class ModelCache:
                 return self._cache[key]
             
             if self.max_size > 0 and len(self._cache) >= self.max_size:
-                self._evict(min(self._access_times, key=self._access_times.get), "Evicted")
+                candidates = {k: t for k, t in self._access_times.items() if k in self._cache}
+                if candidates:
+                    self._evict(min(candidates, key=candidates.get), "Evicted LLM")
         
         # Determine cache settings
         final_use_cache = use_cache and self.config.enable_cache_by_default
@@ -139,7 +141,10 @@ class ModelCache:
                 return self._vlm_cache[key]
             
             if self.max_size > 0 and len(self._vlm_cache) + len(self._cache) >= self.max_size:
-                self._evict(min(self._access_times, key=self._access_times.get), "Evicted")
+                all_model_keys = set(self._cache) | set(self._vlm_cache)
+                candidates = {k: t for k, t in self._access_times.items() if k in all_model_keys}
+                if candidates:
+                    self._evict(min(candidates, key=candidates.get), "Evicted")
         
         from ..vlm.loader import VLMModel
         model = VLMModel.load(model_id, adapter_path)
@@ -195,7 +200,8 @@ class ModelCache:
                 with self._lock:
                     now = time.time()
                     for key in [k for k, t in self._access_times.items() if now - t > self.ttl]:
-                        self._evict(key, "Expired")
+                        if key in self._cache or key in self._vlm_cache:
+                            self._evict(key, "Expired")
 
 
 _cache: Optional[ModelCache] = None

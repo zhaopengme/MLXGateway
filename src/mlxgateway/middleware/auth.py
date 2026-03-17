@@ -2,6 +2,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+_PUBLIC_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
+
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_key: str):
@@ -9,6 +11,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         self.api_key = api_key
 
     async def dispatch(self, request: Request, call_next):
+        if request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+
         auth = request.headers.get("Authorization", "")
 
         if auth.startswith("Bearer "):
