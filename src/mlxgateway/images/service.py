@@ -176,7 +176,7 @@ def _get_or_create_editor(model_version: str, params: dict):
 # ---------------------------------------------------------------------------
 class ImagesService:
 
-    def generate_images(self, request: ImageGenerationRequest) -> List[ImageObject]:
+    def generate_images(self, request: ImageGenerationRequest, base_url: str = "") -> List[ImageObject]:
         params = request.get_extra_params()
         generator = _get_or_create_generator(request.model, params)
 
@@ -215,13 +215,14 @@ class ImagesService:
                 out_dir.mkdir(parents=True, exist_ok=True)
                 path = out_dir / f"{int(time.time())}_{i}.{ext}"
                 result.save(path=str(path), export_json_metadata=False)
-                logger.info(f"Image {i+1} saved: {path}")
-                images.append(ImageObject(url=f"file://{path}", revised_prompt=request.prompt))
+                url = f"{base_url}/v1/images/files/{path.name}" if base_url else f"file://{path}"
+                logger.info(f"Image {i+1} saved: {path} -> {url}")
+                images.append(ImageObject(url=url, revised_prompt=request.prompt))
 
         logger.info(f"Generated {len(images)} image(s)")
         return images
 
-    def edit_images(self, request: ImageEditRequest) -> List[ImageObject]:
+    def edit_images(self, request: ImageEditRequest, base_url: str = "") -> List[ImageObject]:
         params = request.get_extra_params()
         editor = _get_or_create_editor(request.model, params)
 
@@ -263,7 +264,8 @@ class ImagesService:
                 out_dir.mkdir(parents=True, exist_ok=True)
                 path = out_dir / f"{int(time.time())}_{i}_edit.png"
                 result.save(path=str(path), export_json_metadata=False)
-                images.append(ImageObject(url=f"file://{path}", revised_prompt=request.prompt))
+                url = f"{base_url}/v1/images/files/{path.name}" if base_url else f"file://{path}"
+                images.append(ImageObject(url=url, revised_prompt=request.prompt))
 
         logger.info(f"Edited {len(images)} image(s)")
         return images

@@ -1,5 +1,6 @@
 import gc
 import threading
+from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
 import mlx.core as mx
@@ -7,7 +8,7 @@ from mlx_embeddings.utils import load
 
 from ..utils.logger import logger
 
-_cache: Dict[str, Tuple] = {}
+_cache: OrderedDict[str, Tuple] = OrderedDict()
 _lock = threading.Lock()
 _MAX_CACHE = 2
 
@@ -15,6 +16,7 @@ _MAX_CACHE = 2
 def _get_model(model_id: str):
     with _lock:
         if model_id in _cache:
+            _cache.move_to_end(model_id)
             return _cache[model_id]
 
     logger.info(f"Loading embedding model: {model_id}")
@@ -23,10 +25,10 @@ def _get_model(model_id: str):
 
     with _lock:
         if model_id in _cache:
+            _cache.move_to_end(model_id)
             return _cache[model_id]
         if len(_cache) >= _MAX_CACHE:
-            evict_key = next(iter(_cache))
-            del _cache[evict_key]
+            evict_key, _ = _cache.popitem(last=False)
             mx.clear_cache()
             gc.collect()
             logger.info(f"Evicted embedding model: {evict_key}")

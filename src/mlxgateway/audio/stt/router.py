@@ -12,13 +12,14 @@ from .service import STTService
 
 router = APIRouter(prefix="/v1", tags=["speech-to-text"])
 
+_stt_service = STTService()
+
 
 @router.post("/audio/transcriptions", response_model=TranscriptionResponse)
 async def create_transcription(request: STTRequestForm = Depends()):
-    stt_service = STTService()
     try:
         async with gpu_inference():
-            result = await stt_service.transcribe(request)
+            result = await _stt_service.transcribe(request)
         if request.response_format == ResponseFormat.TEXT:
             return PlainTextResponse(content=result)
         return JSONResponse(content=result)

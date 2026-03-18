@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, UploadFile, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference
@@ -13,18 +13,48 @@ from ..utils.logger import logger
 from .schema import ImageEditRequest, ImageGenerationRequest, ImageGenerationResponse, ResponseFormat
 from .service import ImagesService
 
-router = APIRouter(tags=["images"])
+router = APIRouter(prefix="/v1", tags=["images"])
 
 _service = ImagesService()
 
+# Directory for generated images served via the static endpoint
+_IMAGE_OUTPUT_DIR = Path(tempfile.gettempdir()) / "mlxgateway" / "images"
+_IMAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.get("/images/files/{filename}")
+async def serve_generated_image(filename: str):
+    """Serve a previously generated image file."""
+    file_path = _IMAGE_OUTPUT_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        return JSONResponse(
+            status_code=404,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message=f"Image file '{filename}' not found",
+                    type="invalid_request_error",
+                    code="file_not_found",
+                )
+            ).model_dump(),
+        )
+    # Determine media type from extension
+    ext = file_path.suffix.lower()
+    media_types = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    media_type = media_types.get(ext, "application/octet-stream")
+    return FileResponse(file_path, media_type=media_type)
+
 
 @router.post("/images/generations")
-@router.post("/v1/images/generations")
-async def create_image(request: ImageGenerationRequest) -> ImageGenerationResponse:
+async def create_image(request: ImageGenerationRequest, http_request: Request) -> ImageGenerationResponse:
     try:
         logger.info(f"Image generation request: model={request.model}, size={request.size}, n={request.n}")
+        # Build base URL for serving generated images
+        base_url = str(http_request.base_url).rstrip("/")
+
         async with gpu_inference():
-            images = await asyncio.to_thread(_service.generate_images, request)
+            images = await asyncio.to_thread(
+                _service.generate_images, request, base_url
+            )
         
         return ImageGenerationResponse(
             created=int(time.time()), 
@@ -69,7 +99,6 @@ async def create_image(request: ImageGenerationRequest) -> ImageGenerationRespon
 
 
 @router.post("/images/edits")
-@router.post("/v1/images/edits")
 async def edit_image(
     request: Request,
     prompt: str = Form(...),
@@ -132,6 +161,9 @@ async def edit_image(
     
     logger.info(f"Image Edit: model={model}, images={len(image_files)}, n={n}, size={size}, steps={steps}, guidance={guidance}, seed={seed}, quantize={quantize}")
     
+    # Build base URL for serving generated images
+    base_url = str(request.base_url).rstrip("/")
+
     try:
         # Create temporary directory for uploaded images
         temp_dir = Path(tempfile.mkdtemp(prefix="mlxgateway_edit_"))
@@ -184,7 +216,7 @@ async def edit_image(
         if quantize is not None:
             extra_params["quantize"] = quantize
         
-        request = ImageEditRequest(
+        edit_request = ImageEditRequest(
             prompt=prompt,
             model=model,
             n=n,
@@ -196,7 +228,9 @@ async def edit_image(
         )
         
         async with gpu_inference():
-            images = await asyncio.to_thread(_service.edit_images, request)
+            images = await asyncio.to_thread(
+                _service.edit_images, edit_request, base_url
+            )
 
         return ImageGenerationResponse(
             created=int(time.time()), 

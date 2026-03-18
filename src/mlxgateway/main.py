@@ -27,16 +27,21 @@ async def lifespan(app: FastAPI):
     # Initialize GPU semaphore on startup to avoid edge cases
     get_gpu_semaphore()
     yield
+    # Graceful shutdown: save prompt caches and release models
+    logger.info("Shutting down MLX Gateway...")
+    try:
+        from .models.cache import get_model_cache
+        cache = get_model_cache()
+        for key in list(cache._cache.keys()):
+            try:
+                cache._cache[key].save_cache()
+            except Exception as e:
+                logger.warning(f"Failed to save cache for {key.model_id}: {e}")
+        logger.info("Prompt caches saved.")
+    except Exception as e:
+        logger.warning(f"Shutdown cleanup error: {e}")
 
 app = FastAPI(title="MLX Gateway", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.add_middleware(RequestResponseLoggingMiddleware)
 
 
 @app.get("/health", tags=["health"])
@@ -119,6 +124,12 @@ def build_parser():
         default=300,
         help="Timeout in seconds for requests waiting to acquire GPU (default: 300)",
     )
+    parser.add_argument(
+        "--ref-audio",
+        type=str,
+        default=None,
+        help="Path to reference audio file for TTS voice cloning (env: REF_AUDIO_PATH)",
+    )
     return parser
 
 
@@ -138,9 +149,20 @@ def start():
         api_key=args.api_key,
         max_concurrent=args.max_concurrent,
         request_timeout=args.request_timeout,
+        ref_audio_path=args.ref_audio,
     )
     set_config(config)
 
+    # Middleware order: CORS (outermost) -> Logging -> Auth (innermost)
+    # Starlette executes middleware in reverse addition order (last-added runs first),
+    # so we add in this order: CORS, then Logging, then Auth.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(RequestResponseLoggingMiddleware)
     if config.api_key:
         app.add_middleware(APIKeyAuthMiddleware, api_key=config.api_key)
 
@@ -151,6 +173,8 @@ def start():
     logger.info(f"Model list cache: ttl={config.model_list_cache_ttl}s")
     logger.info(f"API key auth: {'enabled' if config.api_key else 'disabled'}")
     logger.info(f"GPU concurrency: max_concurrent={config.max_concurrent}, request_timeout={config.request_timeout}s")
+    if config.ref_audio_path:
+        logger.info(f"TTS reference audio: {config.ref_audio_path}")
 
     uvicorn.run(
         "mlxgateway.main:app",
@@ -163,3 +187,4 @@ def start():
 
 if __name__ == "__main__":
     start()
+

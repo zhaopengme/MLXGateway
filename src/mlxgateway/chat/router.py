@@ -160,6 +160,9 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
         if not request.stream:
             t0 = time.perf_counter()
             async with gpu_inference():
+                # NOTE: Sync call is intentional — MLX GPU operations require the
+                # main thread context and are not safe to run via asyncio.to_thread().
+                # The GPU semaphore already serialises concurrent inference requests.
                 result = generator.generate(**gen_kwargs)
             elapsed = time.perf_counter() - t0
             tool_calls = _parse_tool_calls(result.get("tool_calls"))
@@ -199,6 +202,7 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             ttft = None
             prompt_toks = completion_toks = 0
             async with gpu_inference():
+                # NOTE: Sync iterator is intentional — see comment above re MLX thread safety.
                 for response in generator.generate_stream(**gen_kwargs):
                     if await http_request.is_disconnected():
                         logger.info(f"[{request.model}] Client disconnected, stopping generation")

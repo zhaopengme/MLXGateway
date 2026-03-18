@@ -1,6 +1,7 @@
 """Utility functions for VLM content/model detection and error formatting."""
 
-from functools import lru_cache
+import threading
+import time
 
 from mlx_vlm.utils import load_config
 
@@ -54,14 +55,28 @@ def detect_multimodal_content(content) -> dict:
     return result
 
 
-@lru_cache(maxsize=256)
+# TTL cache for is_vlm_model results (expires so new downloads are detected)
+_vlm_cache: dict[str, tuple[bool, float]] = {}
+_vlm_cache_lock = threading.Lock()
+_VLM_CACHE_TTL = 600  # seconds
+
+
 def is_vlm_model(model_id: str) -> bool:
     """
     Determine whether the provided model should be loaded via mlx-vlm.
 
     The check is heuristic-based and intentionally permissive for common VLM
-    config shapes.
+    config shapes. Results are cached with a TTL so newly downloaded models
+    are detected.
     """
+    now = time.monotonic()
+
+    with _vlm_cache_lock:
+        if model_id in _vlm_cache:
+            result, cached_at = _vlm_cache[model_id]
+            if now - cached_at < _VLM_CACHE_TTL:
+                return result
+
     try:
         config = load_config(model_id) or {}
     except Exception as e:
@@ -76,12 +91,15 @@ def is_vlm_model(model_id: str) -> bool:
         "image_seq_length",
     )
     if any(marker in config for marker in vision_markers):
-        return True
+        result = True
+    else:
+        architectures = config.get("architectures") or []
+        if not isinstance(architectures, list):
+            architectures = [architectures]
+        arch_text = " ".join(str(a).lower() for a in architectures)
+        result = any(token in arch_text for token in ("vision", "vl", "llava", "qwen2vl"))
 
-    architectures = config.get("architectures") or []
-    if not isinstance(architectures, list):
-        architectures = [architectures]
-    arch_text = " ".join(str(a).lower() for a in architectures)
-    return any(token in arch_text for token in ("vision", "vl", "llava", "qwen2vl"))
+    with _vlm_cache_lock:
+        _vlm_cache[model_id] = (result, now)
 
-
+    return result

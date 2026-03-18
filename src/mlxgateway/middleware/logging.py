@@ -46,10 +46,18 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
             )
 
             # Wrapper for stream response
+            _MAX_STREAM_LOG_BYTES = 64 * 1024  # 64 KB cap for logging
+
             async def stream_wrapper(iterator):
                 full_body = b""
+                truncated = False
                 async for chunk in iterator:
-                    full_body += chunk
+                    if not truncated:
+                        if len(full_body) + len(chunk) > _MAX_STREAM_LOG_BYTES:
+                            full_body += chunk[:_MAX_STREAM_LOG_BYTES - len(full_body)]
+                            truncated = True
+                        else:
+                            full_body += chunk
                     yield chunk
 
                 try:
@@ -68,9 +76,10 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
                                 formatted_text += line + "\n"
                         elif line:
                             formatted_text += line + "\n"
-                            
+
+                    suffix = " [truncated]" if truncated else ""
                     logger.info(
-                        f"Stream Output Finished [{request_id}]:\n"
+                        f"Stream Output Finished [{request_id}]{suffix}:\n"
                         f"{formatted_text.strip()}"
                     )
                 except Exception as e:

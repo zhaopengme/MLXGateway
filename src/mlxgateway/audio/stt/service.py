@@ -1,6 +1,7 @@
 import gc
 import tempfile
 import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Union
 
@@ -17,7 +18,7 @@ from .schema import (
     TranscriptionWord,
 )
 
-_stt_cache: Dict[str, nn.Module] = {}
+_stt_cache: OrderedDict[str, nn.Module] = OrderedDict()
 _stt_cache_lock = threading.Lock()
 _MAX_STT_MODELS = 4
 
@@ -25,6 +26,7 @@ _MAX_STT_MODELS = 4
 def _get_or_load_stt_model(model_id: str) -> nn.Module:
     with _stt_cache_lock:
         if model_id in _stt_cache:
+            _stt_cache.move_to_end(model_id)
             logger.debug(f"STT model cache hit: {model_id}")
             return _stt_cache[model_id]
 
@@ -33,8 +35,7 @@ def _get_or_load_stt_model(model_id: str) -> nn.Module:
 
     with _stt_cache_lock:
         if len(_stt_cache) >= _MAX_STT_MODELS and model_id not in _stt_cache:
-            oldest_key = next(iter(_stt_cache))
-            _stt_cache.pop(oldest_key)
+            oldest_key, _ = _stt_cache.popitem(last=False)
             mx.clear_cache()
             gc.collect()
             logger.info(f"STT cache evicted: {oldest_key}")

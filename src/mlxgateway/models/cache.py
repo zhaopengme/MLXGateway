@@ -204,13 +204,13 @@ class ModelCache:
                             self._evict(key, "Expired")
 
 
-_cache: Optional[ModelCache] = None
+_model_cache_instance: Optional[ModelCache] = None
 
 
 def get_model_cache() -> ModelCache:
-    global _cache
-    if _cache is None:
+    global _model_cache_instance
+    if _model_cache_instance is None:
         from ..config import get_config
         config = get_config()
-        _cache = ModelCache(config.max_models, config.model_cache_ttl)
-    return _cache
+        _model_cache_instance = ModelCache(config.max_models, config.model_cache_ttl)
+    return _model_cache_instance

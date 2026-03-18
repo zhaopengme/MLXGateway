@@ -95,10 +95,6 @@ class ChatCompletionRequest(BaseModel):
     
     enable_cache: Optional[bool] = Field(None, description="Enable prompt caching")
     max_kv_size: Optional[int] = Field(None, description="Maximum KV cache size", ge=0)
-    
-    frequency_penalty: Optional[float] = Field(0.0, ge=-2.0, le=2.0, description="Penalize tokens based on frequency")
-    presence_penalty: Optional[float] = Field(0.0, ge=-2.0, le=2.0, description="Penalize tokens based on presence")
-    stop: Optional[Union[str, List[str]]] = Field(None, description="Stop sequences")
 
     class Config:
         extra = "allow"
@@ -106,7 +102,6 @@ class ChatCompletionRequest(BaseModel):
     def get_extra_params(self) -> Dict[str, Any]:
         standard_fields = {
             "model", "messages", "temperature", "top_p", 
-            "max_tokens", "stream", "enable_cache", "max_kv_size",
-            "frequency_penalty", "presence_penalty", "stop", "tools"
+            "max_tokens", "stream", "enable_cache", "max_kv_size", "tools"
         }
         return {k: v for k, v in self.model_dump().items() if k not in standard_fields}

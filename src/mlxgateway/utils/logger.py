@@ -1,15 +1,10 @@
 import logging
-import os
 from datetime import datetime
 from typing import Optional
 
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.text import Text
-
-log_dir = "logs"
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:

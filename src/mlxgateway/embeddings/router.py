@@ -35,6 +35,9 @@ async def create_embeddings(request: EmbeddingRequest):
 
         t0 = time.perf_counter()
         async with gpu_inference():
+            # NOTE: Sync call is intentional — MLX GPU operations require the
+            # main thread context and are not safe to run via asyncio.to_thread().
+            # The GPU semaphore already serialises concurrent inference requests.
             embeddings, total_tokens = generate_embeddings(request.model, texts)
         elapsed = time.perf_counter() - t0
 
