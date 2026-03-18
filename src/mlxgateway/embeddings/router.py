@@ -35,9 +35,7 @@ async def create_embeddings(request: EmbeddingRequest):
 
         t0 = time.perf_counter()
         async with gpu_inference():
-            embeddings, total_tokens = await asyncio.to_thread(
-                generate_embeddings, request.model, texts
-            )
+            embeddings, total_tokens = generate_embeddings(request.model, texts)
         elapsed = time.perf_counter() - t0
 
         dim = len(embeddings[0]) if embeddings else 0
