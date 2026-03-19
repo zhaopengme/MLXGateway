@@ -62,26 +62,26 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
 
                 try:
                     body_text = full_body.decode()
-                    formatted_text = ""
+                    stitched_content = ""
                     for line in body_text.splitlines():
                         if line.startswith("data: "):
                             data = line[6:]
                             if data != "[DONE]":
                                 try:
                                     parsed = json.loads(data)
-                                    formatted_text += json.dumps(parsed, indent=2, ensure_ascii=False) + "\n"
+                                    # Try to extract text delta for chat completions
+                                    if "choices" in parsed and len(parsed["choices"]) > 0:
+                                        delta = parsed["choices"][0].get("delta", {})
+                                        if "content" in delta and delta["content"]:
+                                            stitched_content += delta["content"]
                                 except json.JSONDecodeError:
-                                    formatted_text += line + "\n"
-                            else:
-                                formatted_text += line + "\n"
-                        elif line:
-                            formatted_text += line + "\n"
-
+                                    pass
+                    
                     suffix = " [truncated]" if truncated else ""
-                    logger.info(
-                        f"Stream Output Finished [{request_id}]{suffix}:\n"
-                        f"{formatted_text.strip()}"
-                    )
+                    if stitched_content:
+                        logger.info(f"Stream Output Finished [{request_id}]{suffix} - Generated Text:\n{stitched_content}")
+                    else:
+                        logger.info(f"Stream Output Finished [{request_id}]{suffix}")
                 except Exception as e:
                     logger.info(f"Stream Output Finished [{request_id}] (Parse error: {e})")
 
