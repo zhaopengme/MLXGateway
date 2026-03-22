@@ -1,14 +1,19 @@
 """GPU inference concurrency control via asyncio.Semaphore.
 
-All MLX GPU operations must run on a single dedicated thread (_mlx_executor)
-to avoid thread-safety issues with MLX's Metal GPU context. Using
-asyncio.to_thread() or the default executor can cause deadlocks because
+All MLX GPU operations must run on a single dedicated thread (_mlx_executor,
+max_workers=1) to avoid thread-safety issues with MLX's Metal GPU context.
+Using asyncio.to_thread() or the default executor can cause deadlocks because
 MLX is not safe to call from arbitrary threads.
 
-Each inference type (LLM, Embedding, Image, Audio) has its own semaphore so
-different request types can execute concurrently without blocking each other.
-For example, a long-running LLM chat generation will not block an embedding
-request from being processed.
+Each inference type (LLM, Embedding, Image, Audio) has its own semaphore.
+This prevents cross-type **semaphore starvation**: for example, if the LLM
+semaphore is held by a long chat generation, an embedding request can still
+pass the embedding semaphore and queue on the executor -- rather than timing
+out waiting for a global semaphore blocked by an unrelated request type.
+
+Note that actual GPU execution is still **serialized** because the executor
+has a single worker thread. The per-type semaphores control *admission* and
+*queuing priority*, not parallel GPU execution.
 
 Usage:
     async with gpu_inference("llm"):
@@ -17,6 +22,7 @@ Usage:
 
 import asyncio
 import concurrent.futures
+import threading
 from contextlib import asynccontextmanager
 from typing import Callable, Literal, TypeVar
 
@@ -59,7 +65,14 @@ async def run_on_mlx_thread(fn: Callable[..., T], *args, **kwargs) -> T:
     This avoids blocking the asyncio event loop while ensuring all MLX
     operations execute on the same thread (required for Metal GPU safety).
     Keyword arguments are supported via functools.partial internally.
+
+    WARNING: Never call this from code already running on the MLX worker
+    thread (e.g., inside a function dispatched via run_on_mlx_thread).
+    The single-worker executor would deadlock.
     """
+    assert not threading.current_thread().name.startswith("mlx-worker"), (
+        "run_on_mlx_thread called from the MLX worker thread -- this would deadlock"
+    )
     loop = asyncio.get_running_loop()
     if kwargs:
         import functools

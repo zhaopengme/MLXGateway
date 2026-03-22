@@ -145,3 +145,16 @@ async def get_batcher(model_id: str) -> EmbeddingBatcher:
         if model_id not in _batchers:
             _batchers[model_id] = EmbeddingBatcher(model_id)
         return _batchers[model_id]
+
+
+async def shutdown_all_batchers() -> None:
+    """Cancel all pending embedding futures. Call during server shutdown."""
+    async with _get_batchers_lock():
+        for batcher in _batchers.values():
+            async with batcher._lock:
+                for item in batcher._queue:
+                    if not item.future.done():
+                        item.future.cancel()
+                batcher._queue.clear()
+                batcher._total_texts = 0
+        _batchers.clear()

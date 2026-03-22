@@ -104,7 +104,7 @@ class STTService:
         return self.transcribe_sync(request, audio_path=audio_path)
 
     def transcribe_sync(
-        self, request: STTRequestForm, audio_path: str = None
+        self, request: STTRequestForm, audio_path: str | None = None
     ) -> Union[dict, str, TranscriptionResponse]:
         """Synchronous GPU inference - must be called from the MLX worker thread."""
         _audio_path = audio_path

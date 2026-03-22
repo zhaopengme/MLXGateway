@@ -76,11 +76,12 @@ class BaseMLXModel:
             force: If True, bypass the minimum save interval check.
                    Use for shutdown or explicit flush operations.
         """
-        if not (self.use_cache and self.prompt_cache) or self.is_vlm:
+        cache = self.prompt_cache
+        if not (self.use_cache and cache) or self.is_vlm:
             return
 
         # Check if cache is empty
-        if hasattr(self.prompt_cache[0], 'keys') and self.prompt_cache[0].keys.size == 0:
+        if hasattr(cache[0], 'keys') and cache[0].keys.size == 0:
             return
 
         now = time.monotonic()
@@ -89,7 +90,7 @@ class BaseMLXModel:
 
         try:
             os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
-            save_prompt_cache(self.cache_file, self.prompt_cache)
+            save_prompt_cache(self.cache_file, cache)
             self._last_cache_save = now
             logger.debug(f"Saved prompt cache to {self.cache_file}")
         except Exception as e:

@@ -43,17 +43,24 @@ class ModelCache:
             self._key_locks[key] = threading.RLock()
         return self._key_locks[key]
 
-    def _evict(self, key: CacheKey, reason: str) -> None:
+    def _evict(self, key: CacheKey, reason: str) -> list:
+        """Remove a model from all caches (must be called under self._lock).
+
+        Returns a list of model objects that need .unload() called (which
+        involves MLX GPU operations and must run on the MLX worker thread).
+        """
+        to_unload = []
         if key in self._cache:
-            self._cache.pop(key).unload()
+            to_unload.append(self._cache.pop(key))
         if key in self._vlm_cache:
-            self._vlm_cache.pop(key).unload()
-        
+            to_unload.append(self._vlm_cache.pop(key))
+
         self._generators.pop(key, None)
         self._vlm_generators.pop(key, None)
         self._access_times.pop(key, None)
         self._key_locks.pop(key, None)
         logger.info(f"{reason}: {key.model_id}")
+        return to_unload
 
     def get_model(
         self,
@@ -80,8 +87,9 @@ class ModelCache:
                 if self.max_size > 0 and len(self._cache) >= self.max_size:
                     candidates = {k: t for k, t in self._access_times.items() if k in self._cache}
                     if candidates:
-                        self._evict(min(candidates, key=candidates.get), "Evicted LLM")
-            
+                        for m in self._evict(min(candidates, key=candidates.get), "Evicted LLM"):
+                            m.unload()
+
             # Determine cache settings
             final_use_cache = use_cache and self.config.enable_cache_by_default
             final_max_kv_size = max_kv_size if max_kv_size is not None else self.config.default_max_kv_size
@@ -171,8 +179,9 @@ class ModelCache:
                     all_model_keys = set(self._cache) | set(self._vlm_cache)
                     candidates = {k: t for k, t in self._access_times.items() if k in all_model_keys}
                     if candidates:
-                        self._evict(min(candidates, key=candidates.get), "Evicted")
-            
+                        for m in self._evict(min(candidates, key=candidates.get), "Evicted"):
+                            m.unload()
+
             from ..vlm.loader import VLMModel
             model = VLMModel.load(model_id, adapter_path)
             
@@ -231,14 +240,23 @@ class ModelCache:
             return list(self._cache.values())
     
     def _cleanup_loop(self) -> None:
+        from ..utils.gpu import _mlx_executor
         while True:
             time.sleep(60)
-            if self.ttl > 0:
-                with self._lock:
-                    now = time.time()
-                    for key in [k for k, t in self._access_times.items() if now - t > self.ttl]:
-                        if key in self._cache or key in self._vlm_cache:
-                            self._evict(key, "Expired")
+            if self.ttl <= 0:
+                continue
+            models_to_unload = []
+            with self._lock:
+                now = time.time()
+                for key in [k for k, t in self._access_times.items() if now - t > self.ttl]:
+                    if key in self._cache or key in self._vlm_cache:
+                        models_to_unload.extend(self._evict(key, "Expired"))
+            # Unload on the MLX worker thread (involves MLX GPU operations).
+            if models_to_unload:
+                def _unload_all(models=models_to_unload):
+                    for m in models:
+                        m.unload()
+                _mlx_executor.submit(_unload_all)
 
 
 _model_cache_instance: Optional[ModelCache] = None

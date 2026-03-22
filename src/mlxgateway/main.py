@@ -26,7 +26,6 @@ from .utils.logger import logger, set_logger_level
 def _save_all_caches(force: bool = False) -> None:
     """Save prompt caches for all loaded LLM models. Runs on the MLX worker thread."""
     from .models.cache import get_model_cache
-    from .utils.gpu import get_mlx_executor  # noqa: F401 (imported for context)
     cache = get_model_cache()
     for model in cache.get_llm_models_for_cache_save():
         try:
@@ -59,13 +58,25 @@ async def lifespan(app: FastAPI):
         await saver_task
     except asyncio.CancelledError:
         pass
-    # Graceful shutdown: force-save all prompt caches on the MLX thread
+    # Graceful shutdown
     logger.info("Shutting down MLX Gateway...")
+    # Drain embedding batchers
+    try:
+        from .embeddings.batcher import shutdown_all_batchers
+        await shutdown_all_batchers()
+    except Exception as e:
+        logger.warning(f"Batcher shutdown error: {e}")
+    # Force-save all prompt caches on the MLX thread (with timeout)
     try:
         from .utils.gpu import run_on_mlx_thread
         import functools
-        await run_on_mlx_thread(functools.partial(_save_all_caches, force=True))
+        await asyncio.wait_for(
+            run_on_mlx_thread(functools.partial(_save_all_caches, force=True)),
+            timeout=30,
+        )
         logger.info("Prompt caches saved.")
+    except asyncio.TimeoutError:
+        logger.warning("Shutdown cache save timed out after 30s")
     except Exception as e:
         logger.warning(f"Shutdown cleanup error: {e}")
 

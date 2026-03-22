@@ -11,6 +11,9 @@ from ..utils.logger import logger
 # Truncate logged bodies larger than this (bytes).
 _MAX_LOG_BODY_BYTES = 4096
 
+# Maximum bytes to accumulate for stream response logging.
+_MAX_STREAM_LOG_BYTES = 64 * 1024
+
 # Paths whose response bodies are never logged (too large / binary).
 _SKIP_RESPONSE_BODY_PREFIXES = ("/v1/embeddings", "/v1/images", "/v1/audio")
 
@@ -63,10 +66,17 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
                 f"Status: {response.status_code}\n"
             )
 
+            if skip_body:
+                return response
+
             async def stream_wrapper(iterator):
                 full_body = b""
+                truncated = False
                 async for chunk in iterator:
-                    full_body += chunk
+                    if not truncated and len(full_body) < _MAX_STREAM_LOG_BYTES:
+                        full_body += chunk
+                        if len(full_body) >= _MAX_STREAM_LOG_BYTES:
+                            truncated = True
                     yield chunk
 
                 try:
@@ -86,8 +96,9 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
                         elif line:
                             formatted_text += line + "\n"
 
+                    suffix = " [truncated]" if truncated else ""
                     logger.info(
-                        f"Stream Output Finished [{request_id}]:\n"
+                        f"Stream Output Finished [{request_id}]{suffix}:\n"
                         f"{formatted_text.strip()}"
                     )
                 except Exception as e:

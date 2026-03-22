@@ -1,5 +1,6 @@
 import asyncio
 import json
+import queue as thread_queue
 import threading
 import time
 import uuid
@@ -211,26 +212,32 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             prompt_toks = completion_toks = reasoning_toks = 0
             cancel_event = threading.Event()
 
-            queue: asyncio.Queue = asyncio.Queue()
+            # Thread-safe queue for cross-thread communication between the MLX
+            # worker thread (_produce) and the asyncio event loop (consumer).
+            q: thread_queue.Queue = thread_queue.Queue()
 
             def _produce():
-                """Run the sync stream generator in a thread, pushing results to the queue."""
+                """Run the sync stream generator on the MLX thread, pushing to q."""
                 try:
                     for item in generator.generate_stream(**gen_kwargs):
                         if cancel_event.is_set():
                             break
-                        queue.put_nowait(item)
+                        q.put(item)
                 except Exception as exc:
-                    queue.put_nowait(exc)
+                    q.put(exc)
                 finally:
-                    queue.put_nowait(_SENTINEL)
+                    q.put(_SENTINEL)
+
+            async def _async_get():
+                """Get from thread-safe queue without blocking the event loop."""
+                return await asyncio.get_running_loop().run_in_executor(None, q.get)
 
             async with gpu_inference():
                 loop = asyncio.get_running_loop()
                 fut = loop.run_in_executor(get_mlx_executor(), _produce)
 
                 while True:
-                    response = await queue.get()
+                    response = await _async_get()
                     if response is _SENTINEL:
                         break
                     if isinstance(response, Exception):
