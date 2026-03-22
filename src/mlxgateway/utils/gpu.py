@@ -5,7 +5,7 @@ max_workers=1) to avoid thread-safety issues with MLX's Metal GPU context.
 Using asyncio.to_thread() or the default executor can cause deadlocks because
 MLX is not safe to call from arbitrary threads.
 
-Each inference type (LLM, Embedding, Image, Audio) has its own semaphore.
+Each inference type (LLM, Embedding, Image, Audio, Video) has its own semaphore.
 This prevents cross-type **semaphore starvation**: for example, if the LLM
 semaphore is held by a long chat generation, an embedding request can still
 pass the embedding semaphore and queue on the executor -- rather than timing
@@ -28,7 +28,7 @@ from typing import Callable, Literal, TypeVar
 
 from .logger import logger
 
-InferenceType = Literal["llm", "embedding", "image", "audio"]
+InferenceType = Literal["llm", "embedding", "image", "audio", "video"]
 
 
 def get_mlx_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -85,13 +85,13 @@ async def gpu_inference(inference_type: InferenceType = "llm"):
     """Acquire the semaphore for the given inference type with a configurable timeout.
 
     Each inference type has an independent semaphore, allowing LLM, embedding,
-    image, and audio requests to run concurrently when resources permit.
+    image, audio, and video requests to run concurrently when resources permit.
 
     Raises asyncio.TimeoutError if the wait exceeds request_timeout seconds.
     Callers should catch this and return HTTP 503.
 
     Args:
-        inference_type: One of "llm", "embedding", "image", "audio".
+        inference_type: One of "llm", "embedding", "image", "audio", "video".
                         Defaults to "llm" for backward compatibility.
     """
     from ..config import get_config

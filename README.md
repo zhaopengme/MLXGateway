@@ -45,6 +45,90 @@ pip install -e .
 mlxgateway --host 0.0.0.0 --port 8008 --log-level info
 ```
 
+`
+
+## Usage
+
+download model with huggingface cli 
+```bash
+hf download mlx-community/Qwen3-4B-Instruct-2507-4bit
+```
+
+### Options
+
+```bash
+mlxgateway --host 0.0.0.0 --port 8008 --log-level debug --max-models 4 --model-cache-ttl 600
+```
+
+## API Examples
+
+### Chat Completions
+
+```bash
+curl http://localhost:8008/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "model": "mlx-community/MiroThinker-1.7-mini-mlx-4Bit",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+### Text-to-Speech
+
+```bash
+curl -X POST http://localhost:8008/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "model": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16",
+    "input": "Hello, this is a speech synthesis test.",
+    "voice": "Serena",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+### Embeddings
+
+```bash
+curl http://localhost:8008/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "model": "mlx-community/bge-m3-mlx-4bit",
+    "input": "Hello world"
+  }'
+```
+
+Batch input:
+
+```bash
+curl http://localhost:8008/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "model": "mlx-community/bge-m3-mlx-4bit",
+    "input": ["Hello world", "How are you"]
+  }'
+```
+
+### Image Generation
+
+```bash
+curl -X POST http://localhost:8008/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "model": "black-forest-labs/FLUX.2-klein-4B",
+    "prompt": "a cat sitting on a desk, studio lighting",
+    "size": "1024x1024"
+  }' \
+  --output response.json
+```
+
+
 ### 可用参数与环境变量配置
 
 你可以通过命令行参数或同名的环境变量来配置网关行为：

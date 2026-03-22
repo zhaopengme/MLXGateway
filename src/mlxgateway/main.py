@@ -17,6 +17,7 @@ from .chat.router import router as chat_router
 from .config import Config, set_config
 from .embeddings.router import router as embeddings_router
 from .images.router import router as images_router
+from .video.router import router as video_router
 from .middleware.auth import APIKeyAuthMiddleware
 from .middleware.logging import RequestResponseLoggingMiddleware
 from .models.router import router as models_router
@@ -104,6 +105,7 @@ app.include_router(images_router)
 app.include_router(tts_router)
 app.include_router(stt_router)
 app.include_router(embeddings_router)
+app.include_router(video_router)
 
 
 def build_parser():

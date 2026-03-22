@@ -15,7 +15,7 @@ _MAX_LOG_BODY_BYTES = 4096
 _MAX_STREAM_LOG_BYTES = 64 * 1024
 
 # Paths whose response bodies are never logged (too large / binary).
-_SKIP_RESPONSE_BODY_PREFIXES = ("/v1/embeddings", "/v1/images", "/v1/audio")
+_SKIP_RESPONSE_BODY_PREFIXES = ("/v1/embeddings", "/v1/images", "/v1/audio", "/v1/videos")
 
 
 def format_body(body: str, max_bytes: int = _MAX_LOG_BODY_BYTES) -> str:
