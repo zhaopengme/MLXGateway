@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class VideoPipeline(str, Enum):
@@ -9,6 +9,16 @@ class VideoPipeline(str, Enum):
     DEV = "dev"
     DEV_TWO_STAGE = "dev-two-stage"
     DEV_TWO_STAGE_HQ = "dev-two-stage-hq"
+
+
+class VideoTiling(str, Enum):
+    AUTO = "auto"
+    NONE = "none"
+    CONSERVATIVE = "conservative"
+    DEFAULT = "default"
+    AGGRESSIVE = "aggressive"
+    SPATIAL = "spatial"
+    TEMPORAL = "temporal"
 
 
 class VideoResponseFormat(str, Enum):
@@ -19,8 +29,8 @@ class VideoResponseFormat(str, Enum):
 class VideoGenerationRequest(BaseModel):
     prompt: str = Field(..., max_length=4000)
     model: str = "Lightricks/LTX-2"
-    width: int = Field(default=512, ge=64)
-    height: int = Field(default=512, ge=64)
+    width: int = Field(default=512, ge=64, le=2048)
+    height: int = Field(default=512, ge=64, le=2048)
     num_frames: int = Field(default=97, ge=1, le=257)
     fps: int = Field(default=24, ge=1, le=60)
     seed: Optional[int] = None
@@ -32,9 +42,23 @@ class VideoGenerationRequest(BaseModel):
     image: Optional[str] = None
     image_url: Optional[str] = None
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
-    tiling: str = "auto"
+    tiling: VideoTiling = VideoTiling.AUTO
 
     model_config = {"extra": "allow"}
+
+    @model_validator(mode="after")
+    def validate_constraints(self):
+        if self.width % 32 != 0:
+            raise ValueError(f"width must be divisible by 32, got {self.width}")
+        if self.height % 32 != 0:
+            raise ValueError(f"height must be divisible by 32, got {self.height}")
+        if self.num_frames > 1 and (self.num_frames - 1) % 8 != 0:
+            raise ValueError(
+                f"num_frames must be 1 + 8*k (e.g. 1, 9, 17, 25, ..., 257), got {self.num_frames}"
+            )
+        if self.image and self.image_url:
+            raise ValueError("Provide either 'image' (base64) or 'image_url', not both")
+        return self
 
     def get_extra_params(self) -> Dict[str, Any]:
         standard = {

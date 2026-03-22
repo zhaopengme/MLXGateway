@@ -9,7 +9,7 @@ from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
 from .schema import VideoGenerationRequest, VideoGenerationResponse
-from .service import VideoService, _VIDEO_OUTPUT_DIR
+from .service import VideoService, _VIDEO_OUTPUT_DIR, resolve_image
 
 router = APIRouter(prefix="/v1", tags=["videos"])
 
@@ -49,7 +49,10 @@ async def serve_generated_video(filename: str):
 
 
 @router.post("/videos/generations")
-async def create_video(request: VideoGenerationRequest, http_request: Request):
+async def create_video(
+    request: VideoGenerationRequest, http_request: Request
+) -> VideoGenerationResponse:
+    image_path = None
     try:
         mode = "I2V" if (request.image or request.image_url) else "T2V"
         logger.info(
@@ -58,15 +61,21 @@ async def create_video(request: VideoGenerationRequest, http_request: Request):
         )
         base_url = str(http_request.base_url).rstrip("/")
 
+        # Resolve image BEFORE acquiring GPU semaphore so network I/O
+        # doesn't block the MLX worker thread.
+        if request.image or request.image_url:
+            image_path = await asyncio.to_thread(resolve_image, request)
+
         async with gpu_inference("video"):
             video_obj = await run_on_mlx_thread(
-                _service.generate_video, request, base_url
+                _service.generate_video, request, base_url, image_path
             )
+            image_path = None  # service owns cleanup on success/error via finally
 
         return VideoGenerationResponse(
             created=int(time.time()),
             data=[video_obj],
-        ).model_dump()
+        )
 
     except asyncio.TimeoutError:
         return JSONResponse(
@@ -103,3 +112,8 @@ async def create_video(request: VideoGenerationRequest, http_request: Request):
                 )
             ).model_dump(),
         )
+    finally:
+        # Clean up I2V input image if it wasn't consumed by the service
+        # (e.g., semaphore timeout before run_on_mlx_thread was called).
+        if image_path:
+            Path(image_path).unlink(missing_ok=True)
