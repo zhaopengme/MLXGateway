@@ -2,12 +2,16 @@
 
 import gc
 import os
+import time
 from typing import Any, List, Optional
 
 import mlx.core as mx
 from mlx_lm.models.cache import load_prompt_cache, make_prompt_cache, save_prompt_cache
 
 from ..utils.logger import logger
+
+# Minimum interval between automatic cache saves (seconds).
+_CACHE_SAVE_MIN_INTERVAL = 300
 
 
 class BaseMLXModel:
@@ -36,6 +40,7 @@ class BaseMLXModel:
         self.use_cache = use_cache and not is_vlm
         self.prompt_cache: Optional[List[Any]] = None
         self.cache_file = None
+        self._last_cache_save: float = 0.0
         
         if self.use_cache:
             self.cache_file = os.path.join(
@@ -64,18 +69,28 @@ class BaseMLXModel:
                     return int(val)
         return 4096
     
-    def save_cache(self) -> None:
-        """Save prompt cache to disk (LLM only)."""
+    def save_cache(self, force: bool = False) -> None:
+        """Save prompt cache to disk (LLM only).
+
+        Args:
+            force: If True, bypass the minimum save interval check.
+                   Use for shutdown or explicit flush operations.
+        """
         if not (self.use_cache and self.prompt_cache) or self.is_vlm:
             return
-        
+
         # Check if cache is empty
         if hasattr(self.prompt_cache[0], 'keys') and self.prompt_cache[0].keys.size == 0:
             return
-        
+
+        now = time.monotonic()
+        if not force and (now - self._last_cache_save) < _CACHE_SAVE_MIN_INTERVAL:
+            return
+
         try:
             os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
             save_prompt_cache(self.cache_file, self.prompt_cache)
+            self._last_cache_save = now
             logger.debug(f"Saved prompt cache to {self.cache_file}")
         except Exception as e:
             logger.error(f"Failed to save cache: {e}")

@@ -8,13 +8,29 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..utils.logger import logger
 
+# Truncate logged bodies larger than this (bytes).
+_MAX_LOG_BODY_BYTES = 4096
 
-def format_body(body: str) -> str:
+# Paths whose response bodies are never logged (too large / binary).
+_SKIP_RESPONSE_BODY_PREFIXES = ("/v1/embeddings", "/v1/images", "/v1/audio")
+
+
+def format_body(body: str, max_bytes: int = _MAX_LOG_BODY_BYTES) -> str:
+    """Pretty-print JSON, truncating if the result exceeds max_bytes."""
     try:
         parsed = json.loads(body)
-        return json.dumps(parsed, indent=2, ensure_ascii=False)
+        formatted = json.dumps(parsed, indent=2, ensure_ascii=False)
     except json.JSONDecodeError:
-        return body
+        formatted = body
+
+    if len(formatted.encode()) > max_bytes:
+        truncated = formatted.encode()[:max_bytes].decode(errors="replace")
+        return truncated + f"\n... [truncated, total {len(body)} chars]"
+    return formatted
+
+
+def _should_skip_response_body(path: str) -> bool:
+    return any(path.startswith(p) for p in _SKIP_RESPONSE_BODY_PREFIXES)
 
 
 class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
@@ -39,53 +55,53 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         process_time = time.time() - start_time
 
+        skip_body = _should_skip_response_body(request.url.path)
+
         if is_stream:
             logger.info(
                 f"First Stream Response [{request_id}] took {process_time:.2f}s:\n"
                 f"Status: {response.status_code}\n"
             )
 
-            # Wrapper for stream response
-            _MAX_STREAM_LOG_BYTES = 64 * 1024  # 64 KB cap for logging
-
             async def stream_wrapper(iterator):
                 full_body = b""
-                truncated = False
                 async for chunk in iterator:
-                    if not truncated:
-                        if len(full_body) + len(chunk) > _MAX_STREAM_LOG_BYTES:
-                            full_body += chunk[:_MAX_STREAM_LOG_BYTES - len(full_body)]
-                            truncated = True
-                        else:
-                            full_body += chunk
+                    full_body += chunk
                     yield chunk
 
                 try:
                     body_text = full_body.decode()
-                    stitched_content = ""
+                    formatted_text = ""
                     for line in body_text.splitlines():
                         if line.startswith("data: "):
                             data = line[6:]
                             if data != "[DONE]":
                                 try:
                                     parsed = json.loads(data)
-                                    # Try to extract text delta for chat completions
-                                    if "choices" in parsed and len(parsed["choices"]) > 0:
-                                        delta = parsed["choices"][0].get("delta", {})
-                                        if "content" in delta and delta["content"]:
-                                            stitched_content += delta["content"]
+                                    formatted_text += json.dumps(parsed, indent=2, ensure_ascii=False) + "\n"
                                 except json.JSONDecodeError:
-                                    pass
-                    
-                    suffix = " [truncated]" if truncated else ""
-                    if stitched_content:
-                        logger.info(f"Stream Output Finished [{request_id}]{suffix} - Generated Text:\n{stitched_content}")
-                    else:
-                        logger.info(f"Stream Output Finished [{request_id}]{suffix}")
+                                    formatted_text += line + "\n"
+                            else:
+                                formatted_text += line + "\n"
+                        elif line:
+                            formatted_text += line + "\n"
+
+                    logger.info(
+                        f"Stream Output Finished [{request_id}]:\n"
+                        f"{formatted_text.strip()}"
+                    )
                 except Exception as e:
                     logger.info(f"Stream Output Finished [{request_id}] (Parse error: {e})")
 
             response.body_iterator = stream_wrapper(response.body_iterator)
+            return response
+
+        # Non-streaming: buffer body only if we need to log it.
+        if skip_body:
+            logger.info(
+                f"Response [{request_id}] took {process_time:.2f}s:\n"
+                f"Status: {response.status_code} [body omitted for {request.url.path}]",
+            )
             return response
 
         response_body = b""

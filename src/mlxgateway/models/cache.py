@@ -29,12 +29,19 @@ class ModelCache:
         self._vlm_generators: Dict[CacheKey, "VLMGenerator"] = {}
         self._access_times: Dict[CacheKey, float] = {}
         self._lock = threading.Lock()
+        self._key_locks: Dict[CacheKey, threading.RLock] = {}
         self.max_size = max_size if max_size is not None else config.max_models
         self.ttl = ttl_seconds if ttl_seconds is not None else config.model_cache_ttl
         self.config = config
 
         if self.ttl > 0:
             threading.Thread(target=self._cleanup_loop, daemon=True).start()
+
+    def _get_key_lock(self, key: CacheKey) -> threading.RLock:
+        """Get or create a per-key reentrant lock to prevent duplicate loading."""
+        if key not in self._key_locks:
+            self._key_locks[key] = threading.RLock()
+        return self._key_locks[key]
 
     def _evict(self, key: CacheKey, reason: str) -> None:
         if key in self._cache:
@@ -44,7 +51,8 @@ class ModelCache:
         
         self._generators.pop(key, None)
         self._vlm_generators.pop(key, None)
-        del self._access_times[key]
+        self._access_times.pop(key, None)
+        self._key_locks.pop(key, None)
         logger.info(f"{reason}: {key.model_id}")
 
     def get_model(
@@ -60,29 +68,36 @@ class ModelCache:
             if key in self._cache:
                 self._access_times[key] = time.time()
                 return self._cache[key]
+            key_lock = self._get_key_lock(key)
+
+        with key_lock:
+            # Double-check after acquiring per-key lock
+            with self._lock:
+                if key in self._cache:
+                    self._access_times[key] = time.time()
+                    return self._cache[key]
+                
+                if self.max_size > 0 and len(self._cache) >= self.max_size:
+                    candidates = {k: t for k, t in self._access_times.items() if k in self._cache}
+                    if candidates:
+                        self._evict(min(candidates, key=candidates.get), "Evicted LLM")
             
-            if self.max_size > 0 and len(self._cache) >= self.max_size:
-                candidates = {k: t for k, t in self._access_times.items() if k in self._cache}
-                if candidates:
-                    self._evict(min(candidates, key=candidates.get), "Evicted LLM")
-        
-        # Determine cache settings
-        final_use_cache = use_cache and self.config.enable_cache_by_default
-        final_max_kv_size = max_kv_size if max_kv_size is not None else self.config.default_max_kv_size
-        
-        model = MLXModel.load(
-            model_id,
-            adapter_path,
-            use_cache=final_use_cache,
-            max_kv_size=final_max_kv_size,
-        )
-        
-        with self._lock:
-            if key not in self._cache and self.max_size > 0:
+            # Determine cache settings
+            final_use_cache = use_cache and self.config.enable_cache_by_default
+            final_max_kv_size = max_kv_size if max_kv_size is not None else self.config.default_max_kv_size
+            
+            model = MLXModel.load(
+                model_id,
+                adapter_path,
+                use_cache=final_use_cache,
+                max_kv_size=final_max_kv_size,
+            )
+            
+            with self._lock:
                 self._cache[key] = model
                 self._access_times[key] = time.time()
-        
-        return model
+            
+            return model
     
     def get_generator(
         self, 
@@ -109,18 +124,23 @@ class ModelCache:
             if key in self._generators:
                 self._access_times[key] = time.time()
                 return self._generators[key]
+            key_lock = self._get_key_lock(key)
         
-        from ..chat.generator import ChatGenerator
-        
-        # Get model with cache settings
-        model = self.get_model(model_id, adapter_path, use_cache, max_kv_size)
-        generator = ChatGenerator(model, model_id)
-        
-        with self._lock:
-            if key not in self._generators:
+        with key_lock:
+            with self._lock:
+                if key in self._generators:
+                    self._access_times[key] = time.time()
+                    return self._generators[key]
+            
+            from ..chat.generator import ChatGenerator
+            
+            model = self.get_model(model_id, adapter_path, use_cache, max_kv_size)
+            generator = ChatGenerator(model, model_id)
+            
+            with self._lock:
                 self._generators[key] = generator
-        
-        return generator
+            
+            return generator
 
     def get_vlm_model(self, model_id: str, adapter_path: Optional[str] = None) -> "VLMModel":
         """
@@ -139,22 +159,28 @@ class ModelCache:
             if key in self._vlm_cache:
                 self._access_times[key] = time.time()
                 return self._vlm_cache[key]
+            key_lock = self._get_key_lock(key)
+        
+        with key_lock:
+            with self._lock:
+                if key in self._vlm_cache:
+                    self._access_times[key] = time.time()
+                    return self._vlm_cache[key]
+                
+                if self.max_size > 0 and len(self._vlm_cache) + len(self._cache) >= self.max_size:
+                    all_model_keys = set(self._cache) | set(self._vlm_cache)
+                    candidates = {k: t for k, t in self._access_times.items() if k in all_model_keys}
+                    if candidates:
+                        self._evict(min(candidates, key=candidates.get), "Evicted")
             
-            if self.max_size > 0 and len(self._vlm_cache) + len(self._cache) >= self.max_size:
-                all_model_keys = set(self._cache) | set(self._vlm_cache)
-                candidates = {k: t for k, t in self._access_times.items() if k in all_model_keys}
-                if candidates:
-                    self._evict(min(candidates, key=candidates.get), "Evicted")
-        
-        from ..vlm.loader import VLMModel
-        model = VLMModel.load(model_id, adapter_path)
-        
-        with self._lock:
-            if key not in self._vlm_cache and self.max_size > 0:
+            from ..vlm.loader import VLMModel
+            model = VLMModel.load(model_id, adapter_path)
+            
+            with self._lock:
                 self._vlm_cache[key] = model
                 self._access_times[key] = time.time()
-        
-        return model
+            
+            return model
     
     def get_vlm_generator(
         self, 
@@ -177,17 +203,23 @@ class ModelCache:
             if key in self._vlm_generators:
                 self._access_times[key] = time.time()
                 return self._vlm_generators[key]
+            key_lock = self._get_key_lock(key)
         
-        from ..vlm.generator import VLMGenerator
-        
-        model = self.get_vlm_model(model_id, adapter_path)
-        generator = VLMGenerator(model)
-        
-        with self._lock:
-            if key not in self._vlm_generators:
+        with key_lock:
+            with self._lock:
+                if key in self._vlm_generators:
+                    self._access_times[key] = time.time()
+                    return self._vlm_generators[key]
+            
+            from ..vlm.generator import VLMGenerator
+            
+            model = self.get_vlm_model(model_id, adapter_path)
+            generator = VLMGenerator(model)
+            
+            with self._lock:
                 self._vlm_generators[key] = generator
-        
-        return generator
+            
+            return generator
     
     def get_loaded_model_ids(self) -> List[str]:
         with self._lock:

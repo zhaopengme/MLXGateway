@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...models.error import ErrorDetail, ErrorResponse
-from ...utils.gpu import gpu_inference
+from ...utils.gpu import gpu_inference, run_on_mlx_thread
 from .schema import AudioFormat, TTSRequest
 from .service import TTSService
 
@@ -17,8 +17,8 @@ async def create_speech(request: TTSRequest):
     tts_service = TTSService(request.model)
 
     try:
-        async with gpu_inference():
-            audio_content = await tts_service.generate_speech(request=request)
+        async with gpu_inference("audio"):
+            audio_content = await run_on_mlx_thread(tts_service.generate_speech_sync, request)
 
         content_type_mapping = {
             AudioFormat.MP3: "audio/mpeg",

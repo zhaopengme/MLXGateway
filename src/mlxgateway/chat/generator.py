@@ -1,5 +1,6 @@
 from typing import Any, Dict, Generator, List, Optional
 import json
+import time
 import uuid
 
 from mlx_lm import stream_generate
@@ -176,8 +177,14 @@ class ChatGenerator:
         tool_text = ""
         tool_calls = []
         prompt_tokens_count = completion_tokens_count = 0
+        reasoning_tokens_count = 0
+        first_token_time = None
+        start_time = time.perf_counter()
         
         for response in stream_generate(**self._get_stream_params(prompt, max_tokens, temperature, top_p, progress_callback)):
+            if first_token_time is None:
+                first_token_time = time.perf_counter()
+
             if response.finish_reason:
                 prompt_tokens_count = response.prompt_tokens
                 completion_tokens_count = response.generation_tokens
@@ -187,6 +194,9 @@ class ChatGenerator:
                 response, in_reasoning, in_tool_call, tool_text
             )
             
+            if reasoning:
+                reasoning_tokens_count += 1
+
             # If tool call just ended, parse it
             if in_tool_call and not new_tool_state and tool_text:
                 parsed_tool = self._format_tool_call(tool_text, tools)
@@ -199,6 +209,7 @@ class ChatGenerator:
             if reasoning:
                 reasoning_text += reasoning
         
+        ttft = (first_token_time - start_time) if first_token_time else 0.0
         self.mlx_model.save_cache()
         return {
             "text": content_text,
@@ -206,6 +217,8 @@ class ChatGenerator:
             "tool_calls": tool_calls if tool_calls else None,
             "prompt_tokens": prompt_tokens_count,
             "completion_tokens": completion_tokens_count,
+            "reasoning_tokens": reasoning_tokens_count,
+            "ttft": ttft,
         }
 
     def generate_stream(
@@ -227,12 +240,16 @@ class ChatGenerator:
         tool_calls = []
         tool_idx = 0  # Track index for streaming tool calls
         made_tool_call = False  # Track if any tool calls were made
+        reasoning_tokens_count = 0
         
         for response in stream_generate(**self._get_stream_params(prompt, max_tokens, temperature, top_p, progress_callback)):
             content, reasoning, tool_text, in_reasoning, new_tool_state = self._process_token(
                 response, in_reasoning, in_tool_call, tool_text
             )
             
+            if reasoning:
+                reasoning_tokens_count += 1
+
             # If tool call just ended, parse it
             if in_tool_call and not new_tool_state and tool_text:
                 parsed_tool = self._format_tool_call(tool_text, tools, tool_idx, for_streaming=True)
@@ -247,6 +264,7 @@ class ChatGenerator:
                         "finish_reason": None,
                         "prompt_tokens": response.prompt_tokens,
                         "completion_tokens": response.generation_tokens,
+                        "reasoning_tokens": reasoning_tokens_count,
                     }
                 tool_text = ""
             
@@ -265,6 +283,7 @@ class ChatGenerator:
                     "finish_reason": finish_reason,
                     "prompt_tokens": response.prompt_tokens,
                     "completion_tokens": response.generation_tokens,
+                    "reasoning_tokens": reasoning_tokens_count,
                 }
             
             if response.finish_reason:

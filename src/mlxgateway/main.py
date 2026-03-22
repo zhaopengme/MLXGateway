@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import os
 
 from contextlib import asynccontextmanager
@@ -22,19 +23,43 @@ from .models.router import router as models_router
 from .utils.gpu import get_gpu_semaphore
 from .utils.logger import logger, set_logger_level
 
+async def _periodic_cache_saver(interval: int = 300):
+    """Background task: save all loaded model prompt caches every `interval` seconds."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            from .models.cache import get_model_cache
+            cache = get_model_cache()
+            for key in list(cache._cache.keys()):
+                try:
+                    cache._cache[key].save_cache()
+                except Exception as e:
+                    logger.warning(f"Periodic cache save failed for {key.model_id}: {e}")
+        except Exception as e:
+            logger.warning(f"Periodic cache saver error: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize GPU semaphore on startup to avoid edge cases
     get_gpu_semaphore()
+    # Start background task for periodic prompt cache saves
+    saver_task = asyncio.create_task(_periodic_cache_saver(interval=300))
     yield
-    # Graceful shutdown: save prompt caches and release models
+    # Cancel background saver
+    saver_task.cancel()
+    try:
+        await saver_task
+    except asyncio.CancelledError:
+        pass
+    # Graceful shutdown: force-save all prompt caches
     logger.info("Shutting down MLX Gateway...")
     try:
         from .models.cache import get_model_cache
         cache = get_model_cache()
         for key in list(cache._cache.keys()):
             try:
-                cache._cache[key].save_cache()
+                cache._cache[key].save_cache(force=True)
             except Exception as e:
                 logger.warning(f"Failed to save cache for {key.model_id}: {e}")
         logger.info("Prompt caches saved.")

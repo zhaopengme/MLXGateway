@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import time
 import uuid
 from typing import List, Optional
@@ -112,19 +113,21 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             progress_pct = (processed / total * 100) if total > 0 else 0
             logger.debug(f"Prompt processing progress: {processed}/{total} ({progress_pct:.1f}%)")
         
-        # Get appropriate generator
+        # Get appropriate generator (may trigger model download/loading)
         try:
             if use_vlm_generator:
-                generator = get_model_cache().get_vlm_generator(
+                generator = await asyncio.to_thread(
+                    get_model_cache().get_vlm_generator,
                     request.model, extra_params.get("adapter_path")
                 )
             else:
                 use_cache = request.enable_cache if request.enable_cache is not None else True
-                generator = get_model_cache().get_generator(
+                generator = await asyncio.to_thread(
+                    get_model_cache().get_generator,
                     request.model, 
                     extra_params.get("adapter_path"),
-                    use_cache=use_cache,
-                    max_kv_size=request.max_kv_size,
+                    use_cache,
+                    request.max_kv_size,
                 )
         except Exception as e:
             return _create_error_response(400, str(e), "invalid_request_error", "model_not_found", "model")
@@ -160,19 +163,22 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
         if not request.stream:
             t0 = time.perf_counter()
             async with gpu_inference():
-                # NOTE: Sync call is intentional — MLX GPU operations require the
-                # main thread context and are not safe to run via asyncio.to_thread().
-                # The GPU semaphore already serialises concurrent inference requests.
-                result = generator.generate(**gen_kwargs)
+                result = await asyncio.to_thread(generator.generate, **gen_kwargs)
             elapsed = time.perf_counter() - t0
             tool_calls = _parse_tool_calls(result.get("tool_calls"))
             
             prompt_toks = result["prompt_tokens"]
             completion_toks = result["completion_tokens"]
-            tps = completion_toks / elapsed if elapsed > 0 else 0
+            reasoning_toks = result.get("reasoning_tokens", 0)
+            content_toks = completion_toks - reasoning_toks
+            ttft = result.get("ttft", 0)
+            decode_time = elapsed - ttft
+            tps = completion_toks / decode_time if decode_time > 0 else 0
+            
+            completion_detail = f"(think={reasoning_toks} content={content_toks})" if reasoning_toks else ""
             logger.info(
-                f"[{request.model}] prompt={prompt_toks} completion={completion_toks} "
-                f"time={elapsed:.2f}s speed={tps:.1f} tok/s"
+                f"[{request.model}] prompt={prompt_toks} completion={completion_toks}{completion_detail} "
+                f"ttft={ttft:.2f}s decode={decode_time:.2f}s total={elapsed:.2f}s speed={tps:.1f} tok/s"
             )
             
             return JSONResponse(content=ChatCompletionResponse(
@@ -197,20 +203,47 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             ).model_dump(exclude_none=True))
         
         # Streaming response
+        _SENTINEL = object()
+
         async def event_generator():
             t0 = time.perf_counter()
             ttft = None
-            prompt_toks = completion_toks = 0
+            prompt_toks = completion_toks = reasoning_toks = 0
+            cancel_event = threading.Event()
+
+            queue: asyncio.Queue = asyncio.Queue()
+
+            def _produce():
+                """Run the sync stream generator in a thread, pushing results to the queue."""
+                try:
+                    for item in generator.generate_stream(**gen_kwargs):
+                        if cancel_event.is_set():
+                            break
+                        queue.put_nowait(item)
+                except Exception as exc:
+                    queue.put_nowait(exc)
+                finally:
+                    queue.put_nowait(_SENTINEL)
+
             async with gpu_inference():
-                # NOTE: Sync iterator is intentional — see comment above re MLX thread safety.
-                for response in generator.generate_stream(**gen_kwargs):
+                loop = asyncio.get_running_loop()
+                fut = loop.run_in_executor(None, _produce)
+
+                while True:
+                    response = await queue.get()
+                    if response is _SENTINEL:
+                        break
+                    if isinstance(response, Exception):
+                        raise response
                     if await http_request.is_disconnected():
                         logger.info(f"[{request.model}] Client disconnected, stopping generation")
+                        cancel_event.set()
                         break
                     if ttft is None and (response['text'] or response.get('reasoning')):
                         ttft = time.perf_counter() - t0
                     prompt_toks = response.get('prompt_tokens', prompt_toks)
                     completion_toks = response.get('completion_tokens', completion_toks)
+                    reasoning_toks = response.get('reasoning_tokens', reasoning_toks)
                     yield _create_chunk(
                         completion_id, created, request.model,
                         response['text'], response.get('reasoning'),
@@ -219,14 +252,18 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
                     )
                     if response['finish_reason']:
                         break
+
+                await fut
             
             elapsed = time.perf_counter() - t0
-            gen_time = elapsed - (ttft or 0)
-            tps = completion_toks / gen_time if gen_time > 0 else 0
+            decode_time = elapsed - (ttft or 0)
+            tps = completion_toks / decode_time if decode_time > 0 else 0
             ttft_str = f"{ttft:.2f}s" if ttft is not None else "N/A"
+            content_toks = completion_toks - reasoning_toks
+            completion_detail = f"(think={reasoning_toks} content={content_toks})" if reasoning_toks else ""
             logger.info(
-                f"[{request.model}] prompt={prompt_toks} completion={completion_toks} "
-                f"ttft={ttft_str} gen={gen_time:.2f}s total={elapsed:.2f}s speed={tps:.1f} tok/s"
+                f"[{request.model}] prompt={prompt_toks} completion={completion_toks}{completion_detail} "
+                f"ttft={ttft_str} decode={decode_time:.2f}s total={elapsed:.2f}s speed={tps:.1f} tok/s"
             )
             yield "data: [DONE]\n\n"
         

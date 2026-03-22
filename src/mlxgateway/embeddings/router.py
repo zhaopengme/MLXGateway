@@ -5,10 +5,9 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ..models.error import ErrorDetail, ErrorResponse
-from ..utils.gpu import gpu_inference
 from ..utils.logger import logger
+from .batcher import get_batcher
 from .schema import EmbeddingData, EmbeddingRequest, EmbeddingResponse, EmbeddingUsage
-from .service import generate_embeddings
 
 router = APIRouter(prefix="/v1", tags=["embeddings"])
 
@@ -34,11 +33,8 @@ async def create_embeddings(request: EmbeddingRequest):
             return _error(400, "Input must not be empty.", "invalid_value", "input")
 
         t0 = time.perf_counter()
-        async with gpu_inference():
-            # NOTE: Sync call is intentional — MLX GPU operations require the
-            # main thread context and are not safe to run via asyncio.to_thread().
-            # The GPU semaphore already serialises concurrent inference requests.
-            embeddings, total_tokens = generate_embeddings(request.model, texts)
+        batcher = await get_batcher(request.model)
+        embeddings, total_tokens = await batcher.embed(texts)
         elapsed = time.perf_counter() - t0
 
         dim = len(embeddings[0]) if embeddings else 0

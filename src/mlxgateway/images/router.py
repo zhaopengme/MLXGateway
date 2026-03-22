@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Form, UploadFile, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from ..models.error import ErrorDetail, ErrorResponse
-from ..utils.gpu import gpu_inference
+from ..utils.gpu import gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
 from .schema import ImageEditRequest, ImageGenerationRequest, ImageGenerationResponse, ResponseFormat
 from .service import ImagesService
@@ -25,7 +25,19 @@ _IMAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 @router.get("/images/files/{filename}")
 async def serve_generated_image(filename: str):
     """Serve a previously generated image file."""
-    file_path = _IMAGE_OUTPUT_DIR / filename
+    # Prevent path traversal: resolve and verify the path stays within the output dir
+    file_path = (_IMAGE_OUTPUT_DIR / filename).resolve()
+    if not file_path.is_relative_to(_IMAGE_OUTPUT_DIR.resolve()):
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    message="Invalid filename",
+                    type="invalid_request_error",
+                    code="invalid_value",
+                )
+            ).model_dump(),
+        )
     if not file_path.exists() or not file_path.is_file():
         return JSONResponse(
             status_code=404,
@@ -51,8 +63,8 @@ async def create_image(request: ImageGenerationRequest, http_request: Request) -
         # Build base URL for serving generated images
         base_url = str(http_request.base_url).rstrip("/")
 
-        async with gpu_inference():
-            images = await asyncio.to_thread(
+        async with gpu_inference("image"):
+            images = await run_on_mlx_thread(
                 _service.generate_images, request, base_url
             )
         
@@ -227,8 +239,8 @@ async def edit_image(
             **extra_params
         )
         
-        async with gpu_inference():
-            images = await asyncio.to_thread(
+        async with gpu_inference("image"):
+            images = await run_on_mlx_thread(
                 _service.edit_images, edit_request, base_url
             )
 

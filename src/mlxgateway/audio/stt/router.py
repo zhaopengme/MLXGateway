@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import PlainTextResponse
 
 from ...models.error import ErrorDetail, ErrorResponse
-from ...utils.gpu import gpu_inference
+from ...utils.gpu import gpu_inference, run_on_mlx_thread
 from ...utils.logger import logger
 from .schema import ResponseFormat, STTRequestForm, TranscriptionResponse
 from .service import STTService
@@ -18,8 +18,10 @@ _stt_service = STTService()
 @router.post("/audio/transcriptions", response_model=TranscriptionResponse)
 async def create_transcription(request: STTRequestForm = Depends()):
     try:
-        async with gpu_inference():
-            result = await _stt_service.transcribe(request)
+        # Save uploaded file before acquiring GPU semaphore
+        audio_path = await _stt_service._save_upload_file(request.file)
+        async with gpu_inference("audio"):
+            result = await run_on_mlx_thread(_stt_service.transcribe_sync, request, audio_path)
         if request.response_format == ResponseFormat.TEXT:
             return PlainTextResponse(content=result)
         return JSONResponse(content=result)

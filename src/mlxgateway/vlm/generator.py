@@ -1,5 +1,7 @@
 """VLM Generator for handling multimodal chat completions."""
 
+import ipaddress
+import socket
 import tempfile
 from pathlib import Path
 from typing import Dict, Generator, List, Optional
@@ -11,6 +13,24 @@ from mlx_vlm.prompt_utils import apply_chat_template
 
 from ..utils.logger import logger
 from .loader import VLMModel
+
+
+def _is_safe_url(url: str) -> bool:
+    """Check that a URL does not point to a private/reserved IP address (SSRF protection)."""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        # Resolve hostname to IP and check if it's private/reserved
+        for info in socket.getaddrinfo(hostname, None):
+            addr = info[4][0]
+            ip = ipaddress.ip_address(addr)
+            if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+                return False
+        return True
+    except Exception:
+        return False
 
 
 class VLMGenerator:
@@ -36,6 +56,10 @@ class VLMGenerator:
     def _download_from_url(url: str) -> Optional[str]:
         """Download file from URL and return local path."""
         try:
+            if not _is_safe_url(url):
+                logger.warning(f"Blocked download from private/reserved address: {url}")
+                return None
+
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             

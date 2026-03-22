@@ -98,14 +98,20 @@ class STTService:
     async def transcribe(
         self, request: STTRequestForm
     ) -> Union[dict, str, TranscriptionResponse]:
-        audio_path = None
-        try:
-            logger.info(f"STT input - model: {request.model}, file: {request.file.filename}, language: {request.language}, temp: {request.temperature}")
-            audio_path = await self._save_upload_file(request.file)
+        """Async entry point: save file, then dispatch GPU work to MLX thread."""
+        logger.info(f"STT input - model: {request.model}, file: {request.file.filename}, language: {request.language}, temp: {request.temperature}")
+        audio_path = await self._save_upload_file(request.file)
+        return self.transcribe_sync(request, audio_path=audio_path)
 
+    def transcribe_sync(
+        self, request: STTRequestForm, audio_path: str = None
+    ) -> Union[dict, str, TranscriptionResponse]:
+        """Synchronous GPU inference - must be called from the MLX worker thread."""
+        _audio_path = audio_path
+        try:
             model = _get_or_load_stt_model(request.model)
 
-            logger.info(f"Transcribing audio: {audio_path}")
+            logger.info(f"Transcribing audio: {_audio_path}")
             gen_kwargs = {
                 "temperature": request.temperature,
                 "verbose": False,
@@ -116,7 +122,7 @@ class STTService:
                 gen_kwargs["initial_prompt"] = request.prompt
             result = generate_transcription(
                 model=model,
-                audio=audio_path,
+                audio=_audio_path,
                 **gen_kwargs,
             )
 
@@ -129,10 +135,10 @@ class STTService:
             logger.info(f"STT output - text: {result.text}, language: {result.language or 'en'}, segments: {len(result.segments or [])}")
 
             response = self._format_response(result_dict, request)
-            Path(audio_path).unlink(missing_ok=True)
+            Path(_audio_path).unlink(missing_ok=True)
             return response
 
         except Exception as e:
-            if audio_path:
-                Path(audio_path).unlink(missing_ok=True)
+            if _audio_path:
+                Path(_audio_path).unlink(missing_ok=True)
             raise e
