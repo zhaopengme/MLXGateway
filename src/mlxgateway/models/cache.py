@@ -224,6 +224,11 @@ class ModelCache:
     def get_loaded_model_ids(self) -> List[str]:
         with self._lock:
             return [key.model_id for key in list(self._cache.keys()) + list(self._vlm_cache.keys())]
+
+    def get_llm_models_for_cache_save(self) -> List[MLXModel]:
+        """Return a snapshot of currently loaded LLM models, safe to iterate outside the lock."""
+        with self._lock:
+            return list(self._cache.values())
     
     def _cleanup_loop(self) -> None:
         while True:

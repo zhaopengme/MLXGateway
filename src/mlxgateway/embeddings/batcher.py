@@ -32,8 +32,6 @@ BATCH_WINDOW_MS = 20
 class _PendingItem:
     texts: List[str]
     future: asyncio.Future
-    # Offset into the batch where this item's results start.
-    offset: int = 0
 
 
 class EmbeddingBatcher:
@@ -45,6 +43,8 @@ class EmbeddingBatcher:
         self._lock = asyncio.Lock()
         self._flush_task: Optional[asyncio.Task] = None
         self._total_texts = 0
+        # Strong references to in-flight batch tasks to prevent GC before completion.
+        self._active_tasks: set = set()
 
     async def embed(self, texts: List[str]) -> Tuple[List[List[float]], int]:
         """Submit texts for embedding and await the result."""
@@ -52,7 +52,7 @@ class EmbeddingBatcher:
         future: asyncio.Future = loop.create_future()
 
         async with self._lock:
-            item = _PendingItem(texts=texts, future=future, offset=self._total_texts)
+            item = _PendingItem(texts=texts, future=future)
             self._queue.append(item)
             self._total_texts += len(texts)
 
@@ -93,9 +93,12 @@ class EmbeddingBatcher:
         )
 
         # Run inference outside the lock so new requests can queue up.
-        asyncio.get_running_loop().create_task(
+        # Keep a strong reference so the task is not GC'd before completion.
+        task = asyncio.get_running_loop().create_task(
             self._run_batch(batch_queue, all_texts)
         )
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
 
     async def _run_batch(self, batch_queue: List[_PendingItem], all_texts: List[str]):
         from ..utils.gpu import gpu_inference, run_on_mlx_thread

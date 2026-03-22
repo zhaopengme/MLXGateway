@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -17,11 +18,14 @@ _stt_service = STTService()
 
 @router.post("/audio/transcriptions", response_model=TranscriptionResponse)
 async def create_transcription(request: STTRequestForm = Depends()):
+    audio_path = None
     try:
-        # Save uploaded file before acquiring GPU semaphore
-        audio_path = await _stt_service._save_upload_file(request.file)
+        # Save uploaded file before acquiring GPU semaphore so we don't hold
+        # the semaphore during I/O. The path is tracked for cleanup on error.
+        audio_path = await _stt_service.save_upload_file(request.file)
         async with gpu_inference("audio"):
             result = await run_on_mlx_thread(_stt_service.transcribe_sync, request, audio_path)
+            audio_path = None  # transcribe_sync owns cleanup on success
         if request.response_format == ResponseFormat.TEXT:
             return PlainTextResponse(content=result)
         return JSONResponse(content=result)
@@ -48,3 +52,6 @@ async def create_transcription(request: STTRequestForm = Depends()):
                 )
             ).model_dump(),
         )
+    finally:
+        if audio_path:
+            Path(audio_path).unlink(missing_ok=True)

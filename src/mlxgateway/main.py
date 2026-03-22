@@ -23,18 +23,25 @@ from .models.router import router as models_router
 from .utils.gpu import get_gpu_semaphore
 from .utils.logger import logger, set_logger_level
 
+def _save_all_caches(force: bool = False) -> None:
+    """Save prompt caches for all loaded LLM models. Runs on the MLX worker thread."""
+    from .models.cache import get_model_cache
+    from .utils.gpu import get_mlx_executor  # noqa: F401 (imported for context)
+    cache = get_model_cache()
+    for model in cache.get_llm_models_for_cache_save():
+        try:
+            model.save_cache(force=force)
+        except Exception as e:
+            logger.warning(f"Cache save failed for {model.model_id}: {e}")
+
+
 async def _periodic_cache_saver(interval: int = 300):
     """Background task: save all loaded model prompt caches every `interval` seconds."""
+    from .utils.gpu import run_on_mlx_thread
     while True:
         await asyncio.sleep(interval)
         try:
-            from .models.cache import get_model_cache
-            cache = get_model_cache()
-            for key in list(cache._cache.keys()):
-                try:
-                    cache._cache[key].save_cache()
-                except Exception as e:
-                    logger.warning(f"Periodic cache save failed for {key.model_id}: {e}")
+            await run_on_mlx_thread(_save_all_caches)
         except Exception as e:
             logger.warning(f"Periodic cache saver error: {e}")
 
@@ -52,16 +59,12 @@ async def lifespan(app: FastAPI):
         await saver_task
     except asyncio.CancelledError:
         pass
-    # Graceful shutdown: force-save all prompt caches
+    # Graceful shutdown: force-save all prompt caches on the MLX thread
     logger.info("Shutting down MLX Gateway...")
     try:
-        from .models.cache import get_model_cache
-        cache = get_model_cache()
-        for key in list(cache._cache.keys()):
-            try:
-                cache._cache[key].save_cache(force=True)
-            except Exception as e:
-                logger.warning(f"Failed to save cache for {key.model_id}: {e}")
+        from .utils.gpu import run_on_mlx_thread
+        import functools
+        await run_on_mlx_thread(functools.partial(_save_all_caches, force=True))
         logger.info("Prompt caches saved.")
     except Exception as e:
         logger.warning(f"Shutdown cleanup error: {e}")

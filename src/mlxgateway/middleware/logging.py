@@ -25,7 +25,7 @@ def format_body(body: str, max_bytes: int = _MAX_LOG_BODY_BYTES) -> str:
 
     if len(formatted.encode()) > max_bytes:
         truncated = formatted.encode()[:max_bytes].decode(errors="replace")
-        return truncated + f"\n... [truncated, total {len(body)} chars]"
+        return truncated + f"\n... [truncated, total {len(formatted)} chars]"
     return formatted
 
 

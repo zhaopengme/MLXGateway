@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..models.cache import get_model_cache
 from ..models.error import ErrorDetail, ErrorResponse
-from ..utils.gpu import gpu_inference
+from ..utils.gpu import get_mlx_executor, gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
 from ..vlm.utils import detect_multimodal_content, is_vlm_model
 from .generator import ChatGenerator
@@ -113,18 +113,18 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             progress_pct = (processed / total * 100) if total > 0 else 0
             logger.debug(f"Prompt processing progress: {processed}/{total} ({progress_pct:.1f}%)")
         
-        # Get appropriate generator (may trigger model download/loading)
+        # Get appropriate generator (may trigger model download/loading onto GPU)
         try:
             if use_vlm_generator:
-                generator = await asyncio.to_thread(
+                generator = await run_on_mlx_thread(
                     get_model_cache().get_vlm_generator,
                     request.model, extra_params.get("adapter_path")
                 )
             else:
                 use_cache = request.enable_cache if request.enable_cache is not None else True
-                generator = await asyncio.to_thread(
+                generator = await run_on_mlx_thread(
                     get_model_cache().get_generator,
-                    request.model, 
+                    request.model,
                     extra_params.get("adapter_path"),
                     use_cache,
                     request.max_kv_size,
@@ -163,7 +163,7 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
         if not request.stream:
             t0 = time.perf_counter()
             async with gpu_inference():
-                result = await asyncio.to_thread(generator.generate, **gen_kwargs)
+                result = await run_on_mlx_thread(generator.generate, **gen_kwargs)
             elapsed = time.perf_counter() - t0
             tool_calls = _parse_tool_calls(result.get("tool_calls"))
             
@@ -227,7 +227,7 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
 
             async with gpu_inference():
                 loop = asyncio.get_running_loop()
-                fut = loop.run_in_executor(None, _produce)
+                fut = loop.run_in_executor(get_mlx_executor(), _produce)
 
                 while True:
                     response = await queue.get()

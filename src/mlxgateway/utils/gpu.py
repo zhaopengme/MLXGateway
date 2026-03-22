@@ -24,6 +24,11 @@ from .logger import logger
 
 InferenceType = Literal["llm", "embedding", "image", "audio"]
 
+
+def get_mlx_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Return the shared single-thread MLX executor."""
+    return _mlx_executor
+
 # Per-type semaphores; initialized lazily on first use.
 _semaphores: dict[InferenceType, asyncio.Semaphore] = {}
 

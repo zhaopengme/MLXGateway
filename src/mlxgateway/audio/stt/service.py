@@ -45,7 +45,7 @@ def _get_or_load_stt_model(model_id: str) -> nn.Module:
 
 
 class STTService:
-    async def _save_upload_file(self, file) -> str:
+    async def save_upload_file(self, file) -> str:
         suffix = Path(file.filename).suffix
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
@@ -100,7 +100,7 @@ class STTService:
     ) -> Union[dict, str, TranscriptionResponse]:
         """Async entry point: save file, then dispatch GPU work to MLX thread."""
         logger.info(f"STT input - model: {request.model}, file: {request.file.filename}, language: {request.language}, temp: {request.temperature}")
-        audio_path = await self._save_upload_file(request.file)
+        audio_path = await self.save_upload_file(request.file)
         return self.transcribe_sync(request, audio_path=audio_path)
 
     def transcribe_sync(
