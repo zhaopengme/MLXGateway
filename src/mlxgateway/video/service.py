@@ -27,7 +27,11 @@ def _pipeline_enum(pipeline: VideoPipeline):
 
 
 def _validate_url(url: str) -> None:
-    """Reject non-HTTP schemes and private/internal IP addresses (SSRF protection)."""
+    """Reject non-HTTP schemes and private/internal IP addresses (SSRF protection).
+
+    Note: DNS rebinding can bypass this check (TOCTOU between gethostbyname
+    and urlretrieve). Acceptable for a local-network MLX gateway.
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
@@ -105,8 +109,11 @@ class VideoService:
         if steps is None:
             steps = 40 if request.pipeline == VideoPipeline.DISTILLED else 30
 
+        # text_encoder_repo is a required param in mlx-video's generate_video;
+        # passing None tells it to use the model_repo path for the text encoder.
         gen_kwargs = {
             "model_repo": request.model,
+            "text_encoder_repo": extra.get("text_encoder_repo"),
             "prompt": request.prompt,
             "pipeline": _pipeline_enum(request.pipeline),
             "height": request.height,
@@ -122,10 +129,6 @@ class VideoService:
             "tiling": request.tiling.value,
             "stream": False,
         }
-
-        text_encoder = extra.get("text_encoder_repo")
-        if text_encoder:
-            gen_kwargs["text_encoder_repo"] = text_encoder
 
         if request.negative_prompt is not None:
             gen_kwargs["negative_prompt"] = request.negative_prompt
