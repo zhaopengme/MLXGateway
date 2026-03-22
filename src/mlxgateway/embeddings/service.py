@@ -1,7 +1,7 @@
 import gc
 import threading
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 import mlx.core as mx
 from mlx_embeddings.utils import load

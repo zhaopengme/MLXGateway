@@ -243,20 +243,23 @@ class ModelCache:
         from ..utils.gpu import _mlx_executor
         while True:
             time.sleep(60)
-            if self.ttl <= 0:
-                continue
-            models_to_unload = []
-            with self._lock:
-                now = time.time()
-                for key in [k for k, t in self._access_times.items() if now - t > self.ttl]:
-                    if key in self._cache or key in self._vlm_cache:
-                        models_to_unload.extend(self._evict(key, "Expired"))
-            # Unload on the MLX worker thread (involves MLX GPU operations).
-            if models_to_unload:
-                def _unload_all(models=models_to_unload):
-                    for m in models:
-                        m.unload()
-                _mlx_executor.submit(_unload_all)
+            try:
+                if self.ttl <= 0:
+                    continue
+                models_to_unload = []
+                with self._lock:
+                    now = time.time()
+                    for key in [k for k, t in self._access_times.items() if now - t > self.ttl]:
+                        if key in self._cache or key in self._vlm_cache:
+                            models_to_unload.extend(self._evict(key, "Expired"))
+                # Unload on the MLX worker thread (involves MLX GPU operations).
+                if models_to_unload:
+                    def _unload_all(models=models_to_unload):
+                        for m in models:
+                            m.unload()
+                    _mlx_executor.submit(_unload_all)
+            except Exception as e:
+                logger.warning(f"Cleanup loop error (will retry): {e}")
 
 
 _model_cache_instance: Optional[ModelCache] = None

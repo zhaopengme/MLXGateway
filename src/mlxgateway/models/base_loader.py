@@ -104,8 +104,8 @@ class BaseMLXModel:
         logger.info(f"Unloading {'VLM' if self.is_vlm else 'LLM'}: {self.model_id}")
         
         if not self.is_vlm:
-            self.save_cache()
-        
+            self.save_cache(force=True)
+
         self.model = self.tokenizer = self.processor = self.prompt_cache = None
         self._is_loaded = False
         mx.clear_cache()

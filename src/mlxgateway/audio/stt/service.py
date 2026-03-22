@@ -3,7 +3,7 @@ import tempfile
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, Union
+from typing import Union
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -138,7 +138,7 @@ class STTService:
             Path(_audio_path).unlink(missing_ok=True)
             return response
 
-        except Exception as e:
+        except Exception:
             if _audio_path:
                 Path(_audio_path).unlink(missing_ok=True)
-            raise e
+            raise

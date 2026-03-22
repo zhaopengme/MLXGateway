@@ -16,7 +16,7 @@ Architecture:
 """
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from ..utils.logger import logger
@@ -150,8 +150,15 @@ async def get_batcher(model_id: str) -> EmbeddingBatcher:
 async def shutdown_all_batchers() -> None:
     """Cancel all pending embedding futures. Call during server shutdown."""
     async with _get_batchers_lock():
-        for batcher in _batchers.values():
+        for model_id, batcher in _batchers.items():
             async with batcher._lock:
+                pending = len(batcher._queue)
+                active = len(batcher._active_tasks)
+                if pending or active:
+                    logger.info(
+                        f"[Batcher:{model_id}] Shutting down: "
+                        f"{pending} pending requests, {active} in-flight tasks"
+                    )
                 for item in batcher._queue:
                     if not item.future.done():
                         item.future.cancel()

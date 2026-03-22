@@ -14,7 +14,6 @@ from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import get_mlx_executor, gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
 from ..vlm.utils import detect_multimodal_content, is_vlm_model
-from .generator import ChatGenerator
 from .schema import (
     ChatCompletionChunk,
     ChatCompletionChunkChoice,

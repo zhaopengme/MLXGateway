@@ -6,7 +6,7 @@ import time
 import wave
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import mlx.core as mx
 import mlx.nn as nn
