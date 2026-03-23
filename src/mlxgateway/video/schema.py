@@ -119,8 +119,8 @@ class VideoGenerationRequest(BaseModel):
             )
         if self.audio_file and self.audio_file_url:
             raise ValueError("Provide either 'audio_file' (base64) or 'audio_file_url', not both")
-        # A2V and audio generation are mutually exclusive. Auto-disable audio
-        # generation when A2V input is provided (user didn't explicitly set audio).
+        # A2V and audio generation are mutually exclusive. Always disable audio
+        # generation when A2V input is provided (A2V uses the provided audio).
         if self.audio_file or self.audio_file_url:
             self.audio = False
         return self

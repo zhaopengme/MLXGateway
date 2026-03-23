@@ -50,7 +50,6 @@ async def create_video(
                 _service.generate_video, request, base_url,
                 first_image_path, last_image_path, audio_file_path,
             )
-            first_image_path = last_image_path = audio_file_path = None
 
         return VideoGenerationResponse(
             created=int(time.time()),
