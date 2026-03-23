@@ -45,49 +45,60 @@ def _validate_url(url: str) -> None:
         raise ValueError(f"Cannot resolve hostname: {hostname}")
 
 
-def _resolve_single_image(b64_data: str | None, url: str | None, label: str) -> str | None:
-    """Resolve a single image (base64 or URL) to a local temp file path."""
+def _resolve_file(
+    b64_data: str | None, url: str | None, label: str, ext: str = ".png"
+) -> str | None:
+    """Resolve base64 data or URL to a local temp file path."""
     if b64_data:
         try:
-            img_data = base64.b64decode(b64_data)
-            tmp = TEMP_DIR / f"i2v_{label}_{uuid.uuid4().hex}.png"
-            tmp.write_bytes(img_data)
+            data = base64.b64decode(b64_data)
+            tmp = TEMP_DIR / f"{label}_{uuid.uuid4().hex}{ext}"
+            tmp.write_bytes(data)
             return str(tmp)
         except Exception as e:
-            logger.error(f"Failed to decode base64 {label} image: {e}")
-            raise ValueError(f"Invalid base64 {label} image data") from e
+            logger.error(f"Failed to decode base64 {label}: {e}")
+            raise ValueError(f"Invalid base64 {label} data") from e
 
     if url:
         _validate_url(url)
         import urllib.request
-        tmp = TEMP_DIR / f"i2v_{label}_{uuid.uuid4().hex}.png"
+        suffix = Path(urlparse(url).path).suffix or ext
+        tmp = TEMP_DIR / f"{label}_{uuid.uuid4().hex}{suffix}"
         try:
             urllib.request.urlretrieve(url, str(tmp))
             return str(tmp)
         except Exception as e:
             tmp.unlink(missing_ok=True)
-            logger.error(f"Failed to download {label} image from URL: {e}")
-            raise ValueError(f"Failed to download {label} image: {e}") from e
+            logger.error(f"Failed to download {label} from URL: {e}")
+            raise ValueError(f"Failed to download {label}: {e}") from e
 
     return None
 
 
-def resolve_images(request: VideoGenerationRequest) -> tuple[str | None, str | None]:
-    """Resolve first-frame and last-frame images to local temp file paths.
+def resolve_media(
+    request: VideoGenerationRequest,
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve images and audio to local temp file paths.
 
     This function may perform network I/O and should NOT be called on the
     MLX worker thread. Call it from the async layer.
 
-    Returns (first_image_path, last_image_path).
+    Returns (first_image_path, last_image_path, audio_file_path).
     """
-    first = _resolve_single_image(request.image, request.image_url, "first")
+    resolved = []
     try:
-        last = _resolve_single_image(request.end_image, request.end_image_url, "last")
+        first = _resolve_file(request.image, request.image_url, "i2v_first", ".png")
+        resolved.append(first)
+        last = _resolve_file(request.end_image, request.end_image_url, "i2v_last", ".png")
+        resolved.append(last)
+        audio = _resolve_file(request.audio_file, request.audio_file_url, "a2v_audio", ".wav")
+        resolved.append(audio)
     except Exception:
-        if first:
-            Path(first).unlink(missing_ok=True)
+        for path in resolved:
+            if path:
+                Path(path).unlink(missing_ok=True)
         raise
-    return first, last
+    return first, last, audio
 
 
 class VideoService:
@@ -99,6 +110,7 @@ class VideoService:
         base_url: str = "",
         first_image_path: str | None = None,
         last_image_path: str | None = None,
+        audio_file_path: str | None = None,
     ) -> VideoObject:
         from mlx_video.models.ltx_2.generate import generate_video
 
@@ -109,15 +121,19 @@ class VideoService:
         has_first = first_image_path is not None
         has_last = last_image_path is not None
         is_i2v = has_first or has_last
+        is_a2v = audio_file_path is not None
 
-        if has_first and has_last:
-            mode = "I2V(first+last)"
-        elif has_first:
-            mode = "I2V(first)"
-        elif has_last:
-            mode = "I2V(last)"
-        else:
-            mode = "T2V"
+        parts = []
+        if is_i2v:
+            if has_first and has_last:
+                parts.append("I2V(first+last)")
+            elif has_first:
+                parts.append("I2V(first)")
+            else:
+                parts.append("I2V(last)")
+        if is_a2v:
+            parts.append("A2V")
+        mode = "+".join(parts) if parts else "T2V"
 
         logger.info(
             f"[{mode}] Generating video: model={request.model}, "
@@ -152,6 +168,8 @@ class VideoService:
             "verbose": True,
             "tiling": request.tiling.value,
             "stream": False,
+            "audio": request.audio,
+            "audio_cfg_scale": request.audio_cfg_scale,
         }
 
         if request.negative_prompt is not None:
@@ -166,6 +184,10 @@ class VideoService:
                 gen_kwargs["end_image_strength"] = request.image_strength
             gen_kwargs["image_strength"] = request.image_strength
 
+        if is_a2v:
+            gen_kwargs["audio_file"] = audio_file_path
+            gen_kwargs["audio_start_time"] = request.audio_start_time
+
         for key in ("lora_path", "lora_strength", "enhance_prompt", "spatial_upscaler"):
             if key in extra:
                 gen_kwargs[key] = extra[key]
@@ -178,6 +200,8 @@ class VideoService:
                 Path(first_image_path).unlink(missing_ok=True)
             if last_image_path:
                 Path(last_image_path).unlink(missing_ok=True)
+            if audio_file_path:
+                Path(audio_file_path).unlink(missing_ok=True)
         elapsed = time.perf_counter() - t0
 
         logger.info(f"[{mode}] Video generated in {elapsed:.1f}s: {output_path}")

@@ -9,7 +9,7 @@ from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
 from .schema import VideoGenerationRequest, VideoGenerationResponse
-from .service import VideoService, resolve_images
+from .service import VideoService, resolve_media
 
 router = APIRouter(prefix="/v1", tags=["videos"])
 
@@ -22,23 +22,35 @@ async def create_video(
 ) -> VideoGenerationResponse:
     first_image_path = None
     last_image_path = None
+    audio_file_path = None
     try:
         has_any_image = any([request.image, request.image_url, request.end_image, request.end_image_url])
-        mode = "I2V" if has_any_image else "T2V"
+        has_audio_input = bool(request.audio_file or request.audio_file_url)
+        parts = []
+        if has_any_image:
+            parts.append("I2V")
+        if has_audio_input:
+            parts.append("A2V")
+        mode = "+".join(parts) if parts else "T2V"
+
         logger.info(
             f"Video generation request [{mode}]: model={request.model}, "
             f"{request.width}x{request.height}, frames={request.num_frames}"
         )
         base_url = str(http_request.base_url).rstrip("/")
 
-        if has_any_image:
-            first_image_path, last_image_path = await asyncio.to_thread(resolve_images, request)
+        # Resolve all media files before acquiring GPU semaphore
+        if has_any_image or has_audio_input:
+            first_image_path, last_image_path, audio_file_path = await asyncio.to_thread(
+                resolve_media, request
+            )
 
         async with gpu_inference("video"):
             video_obj = await run_on_mlx_thread(
-                _service.generate_video, request, base_url, first_image_path, last_image_path
+                _service.generate_video, request, base_url,
+                first_image_path, last_image_path, audio_file_path,
             )
-            first_image_path = last_image_path = None
+            first_image_path = last_image_path = audio_file_path = None
 
         return VideoGenerationResponse(
             created=int(time.time()),
@@ -85,3 +97,5 @@ async def create_video(
             Path(first_image_path).unlink(missing_ok=True)
         if last_image_path:
             Path(last_image_path).unlink(missing_ok=True)
+        if audio_file_path:
+            Path(audio_file_path).unlink(missing_ok=True)

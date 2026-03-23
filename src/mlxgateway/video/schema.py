@@ -70,6 +70,29 @@ class VideoGenerationRequest(BaseModel):
         "0 = first frame (default). Ignored when end_image is provided "
         "(automatically set to 0 for image and -1 for end_image).",
     )
+    audio: bool = Field(
+        default=True,
+        description="Generate synchronized audio alongside the video. "
+        "LTX-2 was jointly trained on audio+video; the audio is embedded in the output mp4. "
+        "Automatically disabled when audio_file/audio_file_url is provided (A2V mode).",
+    )
+    audio_cfg_scale: float = Field(
+        default=7.0, ge=0.0, le=20.0,
+        description="CFG guidance scale for audio generation.",
+    )
+    audio_file: Optional[str] = Field(
+        default=None,
+        description="Base64-encoded audio file for A2V (Audio-to-Video). "
+        "The video will be driven by this audio's rhythm and content.",
+    )
+    audio_file_url: Optional[str] = Field(
+        default=None,
+        description="URL of audio file for A2V.",
+    )
+    audio_start_time: float = Field(
+        default=0.0, ge=0.0,
+        description="Start time offset (seconds) to begin reading the A2V audio file.",
+    )
     tiling: VideoTiling = VideoTiling.AUTO
 
     model_config = {"extra": "allow"}
@@ -94,6 +117,11 @@ class VideoGenerationRequest(BaseModel):
             raise ValueError(
                 "Dual-frame conditioning (image + end_image) requires at least 9 frames"
             )
+        if self.audio_file and self.audio_file_url:
+            raise ValueError("Provide either 'audio_file' (base64) or 'audio_file_url', not both")
+        # A2V and audio generation are mutually exclusive
+        if (self.audio_file or self.audio_file_url) and self.audio:
+            self.audio = False
         return self
 
     def get_extra_params(self) -> Dict[str, Any]:
@@ -102,7 +130,8 @@ class VideoGenerationRequest(BaseModel):
             "num_frames", "fps", "seed", "pipeline", "negative_prompt",
             "num_inference_steps", "cfg_scale", "response_format", "image",
             "image_url", "end_image", "end_image_url",
-            "image_strength", "image_frame_idx", "tiling",
+            "image_strength", "image_frame_idx", "audio", "audio_cfg_scale",
+            "audio_file", "audio_file_url", "audio_start_time", "tiling",
         }
         return {k: v for k, v in self.model_dump().items() if k not in standard}
 
