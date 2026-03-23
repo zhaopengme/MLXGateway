@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
@@ -166,27 +167,34 @@ async def create_video_upload(
             f"{width}x{height}, frames={num_frames}"
         )
 
-        # Build a VideoGenerationRequest for the service
-        request_obj = VideoGenerationRequest(
-            prompt=prompt,
-            model=model,
-            text_encoder_repo=text_encoder_repo,
-            width=width,
-            height=height,
-            num_frames=num_frames,
-            fps=fps,
-            seed=seed,
-            pipeline=VideoPipeline(pipeline),
-            negative_prompt=negative_prompt,
-            num_inference_steps=num_inference_steps,
-            cfg_scale=cfg_scale,
-            response_format=response_format,
-            image_strength=image_strength,
-            image_frame_idx=image_frame_idx,
-            audio=not is_a2v,
-            audio_start_time=audio_start_time,
-            tiling=VideoTiling(tiling),
-        )
+        # Validate dual-frame constraint (schema can't see uploaded files)
+        if first_image_path and last_image_path and num_frames < 9:
+            raise ValueError("Dual-frame conditioning (image + end_image) requires at least 9 frames")
+
+        # Build a VideoGenerationRequest for validation and service
+        try:
+            request_obj = VideoGenerationRequest(
+                prompt=prompt,
+                model=model,
+                text_encoder_repo=text_encoder_repo,
+                width=width,
+                height=height,
+                num_frames=num_frames,
+                fps=fps,
+                seed=seed,
+                pipeline=VideoPipeline(pipeline),
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                cfg_scale=cfg_scale,
+                response_format=response_format,
+                image_strength=image_strength,
+                image_frame_idx=image_frame_idx,
+                audio=not is_a2v,
+                audio_start_time=audio_start_time,
+                tiling=VideoTiling(tiling),
+            )
+        except (ValidationError, ValueError) as e:
+            raise ValueError(str(e)) from e
 
         base_url = str(http_request.base_url).rstrip("/")
 
