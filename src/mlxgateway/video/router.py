@@ -9,7 +9,7 @@ from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
 from .schema import VideoGenerationRequest, VideoGenerationResponse
-from .service import VideoService, resolve_image
+from .service import VideoService, resolve_images
 
 router = APIRouter(prefix="/v1", tags=["videos"])
 
@@ -20,23 +20,25 @@ _service = VideoService()
 async def create_video(
     request: VideoGenerationRequest, http_request: Request
 ) -> VideoGenerationResponse:
-    image_path = None
+    first_image_path = None
+    last_image_path = None
     try:
-        mode = "I2V" if (request.image or request.image_url) else "T2V"
+        has_any_image = any([request.image, request.image_url, request.end_image, request.end_image_url])
+        mode = "I2V" if has_any_image else "T2V"
         logger.info(
             f"Video generation request [{mode}]: model={request.model}, "
             f"{request.width}x{request.height}, frames={request.num_frames}"
         )
         base_url = str(http_request.base_url).rstrip("/")
 
-        if request.image or request.image_url:
-            image_path = await asyncio.to_thread(resolve_image, request)
+        if has_any_image:
+            first_image_path, last_image_path = await asyncio.to_thread(resolve_images, request)
 
         async with gpu_inference("video"):
             video_obj = await run_on_mlx_thread(
-                _service.generate_video, request, base_url, image_path
+                _service.generate_video, request, base_url, first_image_path, last_image_path
             )
-            image_path = None
+            first_image_path = last_image_path = None
 
         return VideoGenerationResponse(
             created=int(time.time()),
@@ -79,5 +81,7 @@ async def create_video(
             ).model_dump(),
         )
     finally:
-        if image_path:
-            Path(image_path).unlink(missing_ok=True)
+        if first_image_path:
+            Path(first_image_path).unlink(missing_ok=True)
+        if last_image_path:
+            Path(last_image_path).unlink(missing_ok=True)
