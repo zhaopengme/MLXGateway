@@ -28,7 +28,12 @@ class VideoResponseFormat(str, Enum):
 
 class VideoGenerationRequest(BaseModel):
     prompt: str = Field(..., max_length=4000)
-    model: str = "Lightricks/LTX-2"
+    model: str = "prince-canuma/LTX-2.3-distilled"
+    text_encoder_repo: Optional[str] = Field(
+        default="mlx-community/gemma-3-12b-it-bf16",
+        description="HuggingFace repo for the text encoder. "
+        "Set to null for models that bundle their own text encoder (e.g. Lightricks/LTX-2).",
+    )
     width: int = Field(default=512, ge=64, le=2048)
     height: int = Field(default=512, ge=64, le=2048)
     num_frames: int = Field(default=97, ge=1, le=257)
@@ -62,10 +67,10 @@ class VideoGenerationRequest(BaseModel):
 
     def get_extra_params(self) -> Dict[str, Any]:
         standard = {
-            "prompt", "model", "width", "height", "num_frames", "fps",
-            "seed", "pipeline", "negative_prompt", "num_inference_steps",
-            "cfg_scale", "response_format", "image", "image_url",
-            "image_strength", "tiling",
+            "prompt", "model", "text_encoder_repo", "width", "height",
+            "num_frames", "fps", "seed", "pipeline", "negative_prompt",
+            "num_inference_steps", "cfg_scale", "response_format", "image",
+            "image_url", "image_strength", "tiling",
         }
         return {k: v for k, v in self.model_dump().items() if k not in standard}
 

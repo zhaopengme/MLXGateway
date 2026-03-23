@@ -113,7 +113,7 @@ class VideoService:
         # passing None tells it to use the model_repo path for the text encoder.
         gen_kwargs = {
             "model_repo": request.model,
-            "text_encoder_repo": extra.get("text_encoder_repo"),
+            "text_encoder_repo": request.text_encoder_repo,
             "prompt": request.prompt,
             "pipeline": _pipeline_enum(request.pipeline),
             "height": request.height,
