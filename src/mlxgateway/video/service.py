@@ -81,7 +81,12 @@ def resolve_images(request: VideoGenerationRequest) -> tuple[str | None, str | N
     Returns (first_image_path, last_image_path).
     """
     first = _resolve_single_image(request.image, request.image_url, "first")
-    last = _resolve_single_image(request.end_image, request.end_image_url, "last")
+    try:
+        last = _resolve_single_image(request.end_image, request.end_image_url, "last")
+    except Exception:
+        if first:
+            Path(first).unlink(missing_ok=True)
+        raise
     return first, last
 
 

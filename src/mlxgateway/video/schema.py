@@ -57,8 +57,7 @@ class VideoGenerationRequest(BaseModel):
         default=None,
         description="Base64-encoded last frame image for I2V. "
         "Conditions the video to end at this image. "
-        "NOTE: requires mlx-video with multi-conditioning support; "
-        "currently only one of image/end_image is used per request.",
+        "Can be used alone or together with 'image' for dual-frame conditioning.",
     )
     end_image_url: Optional[str] = Field(
         default=None,
@@ -89,6 +88,12 @@ class VideoGenerationRequest(BaseModel):
             raise ValueError("Provide either 'image' (base64) or 'image_url', not both")
         if self.end_image and self.end_image_url:
             raise ValueError("Provide either 'end_image' (base64) or 'end_image_url', not both")
+        has_first = bool(self.image or self.image_url)
+        has_last = bool(self.end_image or self.end_image_url)
+        if has_first and has_last and self.num_frames < 9:
+            raise ValueError(
+                "Dual-frame conditioning (image + end_image) requires at least 9 frames"
+            )
         return self
 
     def get_extra_params(self) -> Dict[str, Any]:
