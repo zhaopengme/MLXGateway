@@ -135,6 +135,7 @@ class VideoService:
         if is_i2v:
             gen_kwargs["image"] = image_path
             gen_kwargs["image_strength"] = request.image_strength
+            gen_kwargs["image_frame_idx"] = request.image_frame_idx
 
         for key in ("lora_path", "lora_strength", "enhance_prompt", "spatial_upscaler"):
             if key in extra:

@@ -47,6 +47,11 @@ class VideoGenerationRequest(BaseModel):
     image: Optional[str] = None
     image_url: Optional[str] = None
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
+    image_frame_idx: int = Field(
+        default=0,
+        description="Frame index to condition the image on. "
+        "0 = first frame, -1 = last frame, or any valid frame index.",
+    )
     tiling: VideoTiling = VideoTiling.AUTO
 
     model_config = {"extra": "allow"}
@@ -70,7 +75,7 @@ class VideoGenerationRequest(BaseModel):
             "prompt", "model", "text_encoder_repo", "width", "height",
             "num_frames", "fps", "seed", "pipeline", "negative_prompt",
             "num_inference_steps", "cfg_scale", "response_format", "image",
-            "image_url", "image_strength", "tiling",
+            "image_url", "image_strength", "image_frame_idx", "tiling",
         }
         return {k: v for k, v in self.model_dump().items() if k not in standard}
 
