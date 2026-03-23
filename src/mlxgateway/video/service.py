@@ -45,6 +45,10 @@ def _validate_url(url: str) -> None:
         raise ValueError(f"Cannot resolve hostname: {hostname}")
 
 
+_VALID_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+_VALID_AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+
+
 def _resolve_file(
     b64_data: str | None, url: str | None, label: str, ext: str = ".png"
 ) -> str | None:
@@ -62,7 +66,9 @@ def _resolve_file(
     if url:
         _validate_url(url)
         import urllib.request
-        suffix = Path(urlparse(url).path).suffix or ext
+        url_suffix = Path(urlparse(url).path).suffix.lower()
+        allowed = _VALID_IMAGE_EXTS | _VALID_AUDIO_EXTS
+        suffix = url_suffix if url_suffix in allowed else ext
         tmp = TEMP_DIR / f"{label}_{uuid.uuid4().hex}{suffix}"
         try:
             urllib.request.urlretrieve(url, str(tmp))
@@ -192,16 +198,9 @@ class VideoService:
             if key in extra:
                 gen_kwargs[key] = extra[key]
 
+        # Temp file cleanup is owned by the router's finally block.
         t0 = time.perf_counter()
-        try:
-            generate_video(**gen_kwargs)
-        finally:
-            if first_image_path:
-                Path(first_image_path).unlink(missing_ok=True)
-            if last_image_path:
-                Path(last_image_path).unlink(missing_ok=True)
-            if audio_file_path:
-                Path(audio_file_path).unlink(missing_ok=True)
+        generate_video(**gen_kwargs)
         elapsed = time.perf_counter() - t0
 
         logger.info(f"[{mode}] Video generated in {elapsed:.1f}s: {output_path}")
