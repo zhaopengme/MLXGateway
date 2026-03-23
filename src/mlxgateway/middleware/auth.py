@@ -3,6 +3,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 _PUBLIC_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
+# Starlette normalizes path segments (resolves "..", decodes percent-encoding)
+# before populating request.url.path, so prefix matching is safe here.
 _PUBLIC_PREFIXES = ("/static/",)
 
 

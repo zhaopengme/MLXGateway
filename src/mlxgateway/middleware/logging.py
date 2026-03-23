@@ -38,6 +38,9 @@ def _should_skip_response_body(path: str) -> bool:
 
 class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if _should_skip_response_body(request.url.path):
+            return await call_next(request)
+
         body = await self._get_request_body(request)
         request_id = uuid.uuid4().hex[:8]
 

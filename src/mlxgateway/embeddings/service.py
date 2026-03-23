@@ -46,19 +46,14 @@ def generate_embeddings(
     """
     model, tokenizer = _get_model(model_id)
 
-    if len(texts) == 1:
-        inputs = tokenizer.encode(texts[0], return_tensors="mlx")
-        total_tokens = inputs.size
-        outputs = model(inputs)
-    else:
-        inputs = tokenizer(
-            texts, return_tensors="mlx", padding=True, truncation=True, max_length=512
-        )
-        total_tokens = inputs["input_ids"].size
-        outputs = model(
-            inputs["input_ids"],
-            attention_mask=inputs.get("attention_mask"),
-        )
+    inputs = tokenizer(
+        texts, return_tensors="mlx", padding=True, truncation=True, max_length=512
+    )
+    total_tokens = inputs["input_ids"].size
+    outputs = model(
+        inputs["input_ids"],
+        attention_mask=inputs.get("attention_mask"),
+    )
 
     embeddings = outputs.text_embeds
     mx.eval(embeddings)

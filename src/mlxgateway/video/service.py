@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..utils.logger import logger
-from ..utils.static import VIDEOS_DIR
+from ..utils.static import TEMP_DIR, VIDEOS_DIR
 from .schema import VideoGenerationRequest, VideoObject, VideoPipeline, VideoResponseFormat
 
 _VIDEO_OUTPUT_DIR = VIDEOS_DIR
@@ -54,7 +54,7 @@ def resolve_image(request: VideoGenerationRequest) -> str | None:
     if request.image:
         try:
             img_data = base64.b64decode(request.image)
-            tmp = _VIDEO_OUTPUT_DIR / f"i2v_input_{uuid.uuid4().hex}.png"
+            tmp = TEMP_DIR / f"i2v_input_{uuid.uuid4().hex}.png"
             tmp.write_bytes(img_data)
             return str(tmp)
         except Exception as e:
@@ -64,7 +64,7 @@ def resolve_image(request: VideoGenerationRequest) -> str | None:
     if request.image_url:
         _validate_url(request.image_url)
         import urllib.request
-        tmp = _VIDEO_OUTPUT_DIR / f"i2v_input_{uuid.uuid4().hex}.png"
+        tmp = TEMP_DIR / f"i2v_input_{uuid.uuid4().hex}.png"
         try:
             urllib.request.urlretrieve(request.image_url, str(tmp))
             return str(tmp)

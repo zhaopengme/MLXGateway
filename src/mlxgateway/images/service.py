@@ -4,6 +4,7 @@ import io
 import random
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, List
 
@@ -211,7 +212,7 @@ class ImagesService:
                 images.append(ImageObject(b64_json=b64, revised_prompt=request.prompt))
             else:
                 ext = out_fmt.lower().replace("jpeg", "jpg")
-                path = IMAGES_DIR / f"{int(time.time())}_{i}.{ext}"
+                path = IMAGES_DIR / f"{uuid.uuid4().hex}_{i}.{ext}"
                 result.save(path=str(path), export_json_metadata=False)
                 url = f"{base_url}/static/images/{path.name}" if base_url else f"file://{path}"
                 logger.info(f"Image {i+1} saved: {path} -> {url}")
@@ -258,7 +259,7 @@ class ImagesService:
                 b64 = _pil_to_b64(result.image)
                 images.append(ImageObject(b64_json=b64, revised_prompt=request.prompt))
             else:
-                path = IMAGES_DIR / f"{int(time.time())}_{i}_edit.png"
+                path = IMAGES_DIR / f"{uuid.uuid4().hex}_{i}_edit.png"
                 result.save(path=str(path), export_json_metadata=False)
                 url = f"{base_url}/static/images/{path.name}" if base_url else f"file://{path}"
                 images.append(ImageObject(url=url, revised_prompt=request.prompt))
