@@ -1,25 +1,23 @@
 # MLXGateway
 
-MLXGateway 是一个专为 **Apple Silicon (M系列芯片)** 设计的、兼容 **OpenAI API** 格式的本地大模型服务网关。
+MLXGateway is an **OpenAI API-compatible** local AI gateway designed for **Apple Silicon (M-series chips)**. It integrates multiple MLX-based AI libraries into a single FastAPI server, providing a unified API for text, vision, audio, image, and video models running locally.
 
-它将多个基于 MLX 框架的 AI 能力库整合在同一个 FastAPI 服务器下，让你能够通过一套标准的 API 接口，轻松调用本地运行的各类大模型（涵盖文本、视觉、音频、图像、视频）。
+## Features
 
-## 核心特性
+- **OpenAI API Compatible**: Works with any client that supports custom API endpoints (NextChat, Cherry Studio, OpenAI SDK, etc.)
+- **Five Modalities in One Gateway**:
+  - **LLM**: Powered by `mlx-lm` with streaming and tool calling support
+  - **VLM**: Powered by `mlx-vlm` with image, audio, and video input
+  - **Audio**: Powered by `mlx-audio` for STT and TTS with voice cloning
+  - **Images**: Powered by `mflux` for text-to-image and image editing
+  - **Video**: Powered by `mlx-video` for T2V, I2V (first + last frame), and A2V (audio-driven)
+  - **Embeddings**: Powered by `mlx-embeddings` for text vectorization
+- **Model Caching**: LRU cache with TTL eviction and automatic prompt cache persistence
+- **GPU Concurrency Control**: Per-type semaphores (LLM/Embedding/Image/Audio/Video) prevent cross-type request starvation
 
-- **OpenAI API 兼容**：完全兼容 OpenAI 的接入格式（`/v1/chat/completions` 等），可直接使用任何支持自定义 API 端点的客户端。
-- **统一网关，五大模态**：
-  - **LLM (文本大模型)**：基于 `mlx-lm`，支持流式输出和工具调用。
-  - **VLM (视觉语言大模型)**：基于 `mlx-vlm`，支持图片、音频、视频输入。
-  - **Audio (音频处理)**：基于 `mlx-audio`，提供 STT 语音识别和 TTS 语音合成（支持声音克隆）。
-  - **Images (图像生成)**：基于 `mflux`，提供文生图和图片编辑。
-  - **Video (视频生成)**：基于 `mlx-video`，支持 T2V（文生视频）、I2V（图生视频，支持首帧+尾帧双控）、A2V（音频驱动视频）。
-  - **Embeddings (文本向量化)**：基于 `mlx-embeddings`，提供文本转换向量服务。
-- **高效的模型缓存与调度**：LRU 缓存机制管理模型权重，支持 Prompt Cache 自动落盘与恢复。
-- **安全的 GPU 并发控制**：按推理类型（LLM/Embedding/Image/Audio/Video）独立的信号量调度，避免跨类型请求互相阻塞。
+## Installation
 
-## 安装
-
-> 要求：macOS + Apple Silicon (M1/M2/M3/M4)
+> Requires: macOS with Apple Silicon (M1/M2/M3/M4)
 
 ```bash
 git clone https://github.com/zhaopengme/MLXGateway.git
@@ -31,21 +29,21 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-## 启动
+## Quick Start
 
 ```bash
 mlxgateway --host 0.0.0.0 --port 8008 --log-level info
 ```
 
-或使用 `start.sh`（推荐，从 `.env` 读取 API Key）：
+Or use `start.sh` (recommended, reads API key from `.env`):
 
 ```bash
 ./start.sh
 ```
 
-## 下载模型
+## Download Models
 
-使用 HuggingFace CLI 预下载模型：
+Pre-download models with HuggingFace CLI:
 
 ```bash
 # LLM
@@ -61,7 +59,7 @@ hf download mlx-community/bge-m3-mlx-4bit
 hf download prince-canuma/LTX-2.3-distilled
 ```
 
-## API 示例
+## API Examples
 
 ### Chat Completions
 
@@ -91,7 +89,7 @@ curl -X POST http://localhost:8008/v1/audio/speech \
   --output speech.wav
 ```
 
-**声音克隆**：将参考音频放到 `ref/` 目录（如 `ref/myvoice.ogg`），`voice` 填文件名（不含扩展名）：
+**Voice Cloning**: Place reference audio in the `ref/` directory (e.g., `ref/myvoice.ogg`), then set `voice` to the filename without extension:
 
 ```bash
 curl -X POST http://localhost:8008/v1/audio/speech \
@@ -99,7 +97,7 @@ curl -X POST http://localhost:8008/v1/audio/speech \
   -H "Authorization: Bearer token" \
   -d '{
     "model": "mlx-community/fish-audio-s2-pro-bf16",
-    "input": "这是一段声音克隆测试。",
+    "input": "This is a voice cloning test.",
     "voice": "myvoice",
     "response_format": "wav"
   }' \
@@ -133,7 +131,7 @@ curl -X POST http://localhost:8008/v1/images/generations \
 
 ### Video Generation
 
-**文生视频 (T2V)**：
+**Text-to-Video (T2V)**:
 
 ```bash
 curl -X POST http://localhost:8008/v1/videos/generations \
@@ -147,7 +145,7 @@ curl -X POST http://localhost:8008/v1/videos/generations \
   }'
 ```
 
-**图生视频 - 首帧 (I2V)**：
+**Image-to-Video - First Frame (I2V)**:
 
 ```bash
 curl -X POST http://localhost:8008/v1/videos/generations \
@@ -160,7 +158,7 @@ curl -X POST http://localhost:8008/v1/videos/generations \
   }'
 ```
 
-**图生视频 - 首帧+尾帧 (I2V dual-frame)**：
+**Image-to-Video - First + Last Frame (I2V Dual-Frame)**:
 
 ```bash
 curl -X POST http://localhost:8008/v1/videos/generations \
@@ -174,7 +172,7 @@ curl -X POST http://localhost:8008/v1/videos/generations \
   }'
 ```
 
-**音频驱动视频 (A2V)**：
+**Audio-to-Video (A2V)**:
 
 ```bash
 curl -X POST http://localhost:8008/v1/videos/generations \
@@ -187,7 +185,7 @@ curl -X POST http://localhost:8008/v1/videos/generations \
   }'
 ```
 
-**A2V + I2V 组合（音频驱动 + 首尾帧控制）**：
+**A2V + I2V Combined (Audio-Driven + Frame Control)**:
 
 ```bash
 curl -X POST http://localhost:8008/v1/videos/generations \
@@ -204,57 +202,57 @@ curl -X POST http://localhost:8008/v1/videos/generations \
   }'
 ```
 
-#### Video API 参数
+#### Video API Parameters
 
-| 参数 | 默认值 | 说明 |
+| Parameter | Default | Description |
 |:---|:---|:---|
-| `prompt` | (必填) | 视频描述（建议用英文） |
-| `model` | `prince-canuma/LTX-2.3-distilled` | 视频模型 |
-| `width` / `height` | `512` | 分辨率（必须被 32 整除，上限 2048） |
-| `num_frames` | `97` | 帧数（必须为 1+8k，如 9/17/25/.../257） |
-| `fps` | `24` | 帧率 |
-| `pipeline` | `distilled` | 生成管线：`distilled`(快) / `dev`(高质量) / `dev-two-stage` / `dev-two-stage-hq` |
-| `cfg_scale` | `3.0` | CFG 引导强度（dev pipeline 生效） |
-| `seed` | 随机 | 随机种子 |
-| `image` / `image_url` | - | 首帧图片（base64 或 URL） |
-| `end_image` / `end_image_url` | - | 尾帧图片（base64 或 URL） |
-| `image_strength` | `1.0` | 图片条件强度 |
-| `audio` | `true` | 是否生成同步音频（A2V 模式自动关闭） |
-| `audio_file` / `audio_file_url` | - | A2V 输入音频（base64 或 URL） |
-| `audio_start_time` | `0.0` | A2V 音频起始偏移（秒） |
-| `response_format` | `url` | 返回格式：`url` 或 `b64_json` |
-| `tiling` | `auto` | VAE tiling 模式 |
+| `prompt` | (required) | Video description (English recommended) |
+| `model` | `prince-canuma/LTX-2.3-distilled` | Video model |
+| `width` / `height` | `512` | Resolution (must be divisible by 32, max 2048) |
+| `num_frames` | `97` | Frame count (must be 1+8k, e.g., 9/17/25/.../257) |
+| `fps` | `24` | Frames per second |
+| `pipeline` | `distilled` | Pipeline: `distilled` (fast) / `dev` (quality) / `dev-two-stage` / `dev-two-stage-hq` |
+| `cfg_scale` | `3.0` | CFG guidance scale (effective with dev pipeline) |
+| `seed` | random | Random seed for reproducibility |
+| `image` / `image_url` | - | First frame image (base64 or URL) |
+| `end_image` / `end_image_url` | - | Last frame image (base64 or URL) |
+| `image_strength` | `1.0` | Image conditioning strength |
+| `audio` | `true` | Generate synchronized audio (auto-disabled in A2V mode) |
+| `audio_file` / `audio_file_url` | - | A2V input audio (base64 or URL) |
+| `audio_start_time` | `0.0` | A2V audio start offset (seconds) |
+| `response_format` | `url` | Response format: `url` or `b64_json` |
+| `tiling` | `auto` | VAE tiling mode |
 
-## 配置参数
+## Configuration
 
-| CLI 参数 | 环境变量 | 说明 | 默认值 |
+| CLI Argument | Env Variable | Description | Default |
 |:---|:---|:---|:---|
-| `--host` | `HOST` | 监听地址 | `127.0.0.1` |
-| `--port` | `PORT` | 监听端口 | `8008` |
-| `--api-key` | `API_KEY` | API 密钥（可选） | 禁用 |
-| `--max-models` | `MAX_MODELS` | 最大缓存模型数 | `4` |
-| `--model-cache-ttl` | `MODEL_CACHE_TTL` | 模型空闲过期时间（秒） | `600` |
-| `--max-concurrent` | `MAX_CONCURRENT` | GPU 最大并行推理数 | `1` |
-| `--request-timeout` | `REQUEST_TIMEOUT` | GPU 队列等待超时（秒） | `300` |
-| `--ref-audio` | `REF_AUDIO_PATH` | TTS 参考音频目录 | `ref/` |
+| `--host` | `HOST` | Bind address | `127.0.0.1` |
+| `--port` | `PORT` | Bind port | `8008` |
+| `--api-key` | `API_KEY` | API key authentication (optional) | disabled |
+| `--max-models` | `MAX_MODELS` | Max cached models | `4` |
+| `--model-cache-ttl` | `MODEL_CACHE_TTL` | Model idle expiry (seconds) | `600` |
+| `--max-concurrent` | `MAX_CONCURRENT` | Max concurrent GPU inference | `1` |
+| `--request-timeout` | `REQUEST_TIMEOUT` | GPU queue wait timeout (seconds) | `300` |
+| `--ref-audio` | `REF_AUDIO_PATH` | TTS reference audio directory | `ref/` |
 
-## API 端点一览
+## API Endpoints
 
-| 端点 | 说明 |
+| Endpoint | Description |
 |:---|:---|
-| `GET /health` | 健康检查 |
-| `GET /v1/models` | 列出可用模型 |
-| `POST /v1/chat/completions` | 对话补全（文本/多模态/流式） |
-| `POST /v1/embeddings` | 文本嵌入向量 |
-| `POST /v1/audio/transcriptions` | 语音转文字 (STT) |
-| `POST /v1/audio/speech` | 文字转语音 (TTS) |
-| `POST /v1/images/generations` | 文生图 |
-| `POST /v1/images/edits` | 图片编辑 |
-| `POST /v1/videos/generations` | 视频生成（T2V / I2V / A2V） |
-| `GET /static/...` | 静态文件（生成的图片/视频，无需认证） |
+| `GET /health` | Health check |
+| `GET /v1/models` | List available models |
+| `POST /v1/chat/completions` | Chat completions (text/multimodal/streaming) |
+| `POST /v1/embeddings` | Text embeddings |
+| `POST /v1/audio/transcriptions` | Speech-to-text (STT) |
+| `POST /v1/audio/speech` | Text-to-speech (TTS) |
+| `POST /v1/images/generations` | Image generation |
+| `POST /v1/images/edits` | Image editing |
+| `POST /v1/videos/generations` | Video generation (T2V / I2V / A2V) |
+| `GET /static/...` | Static files (generated images/videos, no auth required) |
 
-启动后访问 [http://127.0.0.1:8008/docs](http://127.0.0.1:8008/docs) 查看交互式 API 文档。
+Visit [http://127.0.0.1:8008/docs](http://127.0.0.1:8008/docs) after starting the server for interactive API documentation.
 
-## 贡献
+## Contributing
 
-欢迎提交 Issue 和 Pull Request！
+Issues and Pull Requests are welcome!
