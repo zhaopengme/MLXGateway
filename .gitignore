@@ -44,3 +44,4 @@ logs/
 # Local scripts & data
 start.sh
 .env
+static/

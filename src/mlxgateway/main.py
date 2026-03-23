@@ -19,6 +19,7 @@ from .embeddings.router import router as embeddings_router
 from .images.router import router as images_router
 from .video.router import router as video_router
 from .middleware.auth import APIKeyAuthMiddleware
+from .utils.static import _BASE as STATIC_DIR
 from .middleware.logging import RequestResponseLoggingMiddleware
 from .models.router import router as models_router
 from .utils.gpu import get_gpu_semaphore
@@ -106,6 +107,10 @@ app.include_router(tts_router)
 app.include_router(stt_router)
 app.include_router(embeddings_router)
 app.include_router(video_router)
+
+# Serve generated files (images, videos) as static assets -- no auth required.
+from starlette.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def build_parser():

@@ -3,49 +3,17 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
 from .schema import VideoGenerationRequest, VideoGenerationResponse
-from .service import VideoService, _VIDEO_OUTPUT_DIR, resolve_image
+from .service import VideoService, resolve_image
 
 router = APIRouter(prefix="/v1", tags=["videos"])
 
 _service = VideoService()
-
-
-@router.get("/videos/files/{filename}")
-async def serve_generated_video(filename: str):
-    """Serve a previously generated video file."""
-    file_path = (_VIDEO_OUTPUT_DIR / filename).resolve()
-    if not file_path.is_relative_to(_VIDEO_OUTPUT_DIR.resolve()):
-        return JSONResponse(
-            status_code=400,
-            content=ErrorResponse(
-                error=ErrorDetail(
-                    message="Invalid filename",
-                    type="invalid_request_error",
-                    code="invalid_value",
-                )
-            ).model_dump(),
-        )
-    if not file_path.exists() or not file_path.is_file():
-        return JSONResponse(
-            status_code=404,
-            content=ErrorResponse(
-                error=ErrorDetail(
-                    message=f"Video file '{filename}' not found",
-                    type="invalid_request_error",
-                    code="file_not_found",
-                )
-            ).model_dump(),
-        )
-    ext = file_path.suffix.lower()
-    media_types = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime"}
-    media_type = media_types.get(ext, "application/octet-stream")
-    return FileResponse(file_path, media_type=media_type)
 
 
 @router.post("/videos/generations")
@@ -61,8 +29,6 @@ async def create_video(
         )
         base_url = str(http_request.base_url).rstrip("/")
 
-        # Resolve image BEFORE acquiring GPU semaphore so network I/O
-        # doesn't block the MLX worker thread.
         if request.image or request.image_url:
             image_path = await asyncio.to_thread(resolve_image, request)
 
@@ -70,7 +36,7 @@ async def create_video(
             video_obj = await run_on_mlx_thread(
                 _service.generate_video, request, base_url, image_path
             )
-            image_path = None  # service owns cleanup on success/error via finally
+            image_path = None
 
         return VideoGenerationResponse(
             created=int(time.time()),
@@ -113,7 +79,5 @@ async def create_video(
             ).model_dump(),
         )
     finally:
-        # Clean up I2V input image if it wasn't consumed by the service
-        # (e.g., semaphore timeout before run_on_mlx_thread was called).
         if image_path:
             Path(image_path).unlink(missing_ok=True)

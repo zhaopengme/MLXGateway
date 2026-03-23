@@ -2,17 +2,16 @@ import base64
 import ipaddress
 import random
 import socket
-import tempfile
 import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
 from ..utils.logger import logger
+from ..utils.static import VIDEOS_DIR
 from .schema import VideoGenerationRequest, VideoObject, VideoPipeline, VideoResponseFormat
 
-_VIDEO_OUTPUT_DIR = Path(tempfile.gettempdir()) / "mlxgateway" / "videos"
-_VIDEO_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+_VIDEO_OUTPUT_DIR = VIDEOS_DIR
 
 
 def _pipeline_enum(pipeline: VideoPipeline):
@@ -158,5 +157,5 @@ class VideoService:
             logger.info(f"[{mode}] Encoded video: {len(b64)} chars base64")
             return VideoObject(b64_json=b64, revised_prompt=request.prompt)
 
-        url = f"{base_url}/v1/videos/files/{output_filename}" if base_url else f"file://{output_path}"
+        url = f"{base_url}/static/videos/{output_filename}" if base_url else f"file://{output_path}"
         return VideoObject(url=url, revised_prompt=request.prompt)

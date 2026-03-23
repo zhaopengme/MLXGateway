@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 _PUBLIC_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
-_PUBLIC_PREFIXES = ("/v1/videos/files/", "/v1/images/files/")
+_PUBLIC_PREFIXES = ("/static/",)
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):

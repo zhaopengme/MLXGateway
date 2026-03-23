@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, UploadFile, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
@@ -16,44 +16,6 @@ from .service import ImagesService
 router = APIRouter(prefix="/v1", tags=["images"])
 
 _service = ImagesService()
-
-# Directory for generated images served via the static endpoint
-_IMAGE_OUTPUT_DIR = Path(tempfile.gettempdir()) / "mlxgateway" / "images"
-_IMAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-@router.get("/images/files/{filename}")
-async def serve_generated_image(filename: str):
-    """Serve a previously generated image file."""
-    # Prevent path traversal: resolve and verify the path stays within the output dir
-    file_path = (_IMAGE_OUTPUT_DIR / filename).resolve()
-    if not file_path.is_relative_to(_IMAGE_OUTPUT_DIR.resolve()):
-        return JSONResponse(
-            status_code=400,
-            content=ErrorResponse(
-                error=ErrorDetail(
-                    message="Invalid filename",
-                    type="invalid_request_error",
-                    code="invalid_value",
-                )
-            ).model_dump(),
-        )
-    if not file_path.exists() or not file_path.is_file():
-        return JSONResponse(
-            status_code=404,
-            content=ErrorResponse(
-                error=ErrorDetail(
-                    message=f"Image file '{filename}' not found",
-                    type="invalid_request_error",
-                    code="file_not_found",
-                )
-            ).model_dump(),
-        )
-    # Determine media type from extension
-    ext = file_path.suffix.lower()
-    media_types = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
-    media_type = media_types.get(ext, "application/octet-stream")
-    return FileResponse(file_path, media_type=media_type)
 
 
 @router.post("/images/generations")

@@ -2,13 +2,13 @@ import base64
 import inspect
 import io
 import random
-import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Dict, List
 
 from ..utils.logger import logger
+from ..utils.static import IMAGES_DIR
 from .schema import ImageEditRequest, ImageGenerationRequest, ImageObject, ResponseFormat
 
 
@@ -211,11 +211,9 @@ class ImagesService:
                 images.append(ImageObject(b64_json=b64, revised_prompt=request.prompt))
             else:
                 ext = out_fmt.lower().replace("jpeg", "jpg")
-                out_dir = Path(tempfile.gettempdir()) / "mlxgateway" / "images"
-                out_dir.mkdir(parents=True, exist_ok=True)
-                path = out_dir / f"{int(time.time())}_{i}.{ext}"
+                path = IMAGES_DIR / f"{int(time.time())}_{i}.{ext}"
                 result.save(path=str(path), export_json_metadata=False)
-                url = f"{base_url}/v1/images/files/{path.name}" if base_url else f"file://{path}"
+                url = f"{base_url}/static/images/{path.name}" if base_url else f"file://{path}"
                 logger.info(f"Image {i+1} saved: {path} -> {url}")
                 images.append(ImageObject(url=url, revised_prompt=request.prompt))
 
@@ -260,11 +258,9 @@ class ImagesService:
                 b64 = _pil_to_b64(result.image)
                 images.append(ImageObject(b64_json=b64, revised_prompt=request.prompt))
             else:
-                out_dir = Path(tempfile.gettempdir()) / "mlxgateway" / "images"
-                out_dir.mkdir(parents=True, exist_ok=True)
-                path = out_dir / f"{int(time.time())}_{i}_edit.png"
+                path = IMAGES_DIR / f"{int(time.time())}_{i}_edit.png"
                 result.save(path=str(path), export_json_metadata=False)
-                url = f"{base_url}/v1/images/files/{path.name}" if base_url else f"file://{path}"
+                url = f"{base_url}/static/images/{path.name}" if base_url else f"file://{path}"
                 images.append(ImageObject(url=url, revised_prompt=request.prompt))
 
         logger.info(f"Edited {len(images)} image(s)")
