@@ -46,7 +46,7 @@ def generate_embeddings(
     """
     model, tokenizer = _get_model(model_id)
 
-    inputs = tokenizer(
+    inputs = tokenizer._tokenizer(
         texts, return_tensors="mlx", padding=True, truncation=True, max_length=512
     )
     total_tokens = inputs["input_ids"].size

@@ -153,23 +153,12 @@ class VideoService:
             gen_kwargs["negative_prompt"] = request.negative_prompt
 
         if is_i2v:
-            # mlx-video's generate_video currently supports one conditioning image.
-            # When both first and last are provided, we use the first frame image
-            # and log a warning about the limitation.
-            if has_first and has_last:
-                logger.warning(
-                    "Both first and last frame images provided, but mlx-video only "
-                    "supports single-image conditioning. Using first frame image. "
-                    "Last frame image will be ignored until multi-conditioning is supported."
-                )
-                gen_kwargs["image"] = first_image_path
-                gen_kwargs["image_frame_idx"] = 0
-            elif has_first:
+            if has_first:
                 gen_kwargs["image"] = first_image_path
                 gen_kwargs["image_frame_idx"] = request.image_frame_idx
-            else:
-                gen_kwargs["image"] = last_image_path
-                gen_kwargs["image_frame_idx"] = -1
+            if has_last:
+                gen_kwargs["end_image"] = last_image_path
+                gen_kwargs["end_image_strength"] = request.image_strength
             gen_kwargs["image_strength"] = request.image_strength
 
         for key in ("lora_path", "lora_strength", "enhance_prompt", "spatial_upscaler"):
