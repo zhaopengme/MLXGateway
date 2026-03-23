@@ -2,65 +2,66 @@
 
 MLXGateway 是一个专为 **Apple Silicon (M系列芯片)** 设计的、兼容 **OpenAI API** 格式的本地大模型服务网关。
 
-它将多个基于 MLX 框架的 AI 能力库整合在同一个 FastAPI 服务器下，让你能够通过一套标准的 API 接口，轻松调用本地运行的各类大模型（涵盖文本、视觉、音频、图像）。
+它将多个基于 MLX 框架的 AI 能力库整合在同一个 FastAPI 服务器下，让你能够通过一套标准的 API 接口，轻松调用本地运行的各类大模型（涵盖文本、视觉、音频、图像、视频）。
 
-## 🌟 核心特性
+## 核心特性
 
-- **OpenAI API 兼容**：完全兼容 OpenAI 的接入格式（`/v1/chat/completions` 等），可直接使用任何支持自定义 API 端点的客户端（如 NextChat, Cherry Studio, OpenAI 官方 SDK 等）。
-- **统一大一统网关**：在一个服务中无缝集成四大模态：
-  - **LLM (文本大模型)**：基于 `mlx-lm`，支持流式输出 (Streaming) 和工具调用 (Tool Calling)。
-  - **VLM (视觉语言大模型)**：基于 `mlx-vlm`，支持通过提示词传入图片、音频或视频。
-  - **Audio (音频/语音处理)**：基于 `mlx-audio`，提供 STT 语音识别 (`/v1/audio/transcriptions`) 和带有声音克隆能力的 TTS 语音合成 (`/v1/audio/speech`)。
-  - **Images (图像生成与编辑)**：基于 `mflux`，提供生图 (`/v1/images/generations`) 和修图 (`/v1/images/edits`) 功能，并支持通过静态 URL 直接预览结果。
-  - **Embeddings (文本向量化)**：基于 `mlx-embeddings`，提供文本转换向量服务 (`/v1/embeddings`)。
-- **高效的模型缓存与调度**：
-  - 采用模块化的 `OrderedDict` (LRU) 缓存机制管理所有加载的权重文件，避免重复读取硬盘引发的延迟。
-  - 支持 Prompt Cache 自动落盘与恢复。
-- **安全的 GPU 并发控制**：通过请求级别的显式 GPU Semaphore（信号量）调度，有效杜绝由于并发推理引发的内存溢出 (OOM) 崩溃问题。
+- **OpenAI API 兼容**：完全兼容 OpenAI 的接入格式（`/v1/chat/completions` 等），可直接使用任何支持自定义 API 端点的客户端。
+- **统一网关，五大模态**：
+  - **LLM (文本大模型)**：基于 `mlx-lm`，支持流式输出和工具调用。
+  - **VLM (视觉语言大模型)**：基于 `mlx-vlm`，支持图片、音频、视频输入。
+  - **Audio (音频处理)**：基于 `mlx-audio`，提供 STT 语音识别和 TTS 语音合成（支持声音克隆）。
+  - **Images (图像生成)**：基于 `mflux`，提供文生图和图片编辑。
+  - **Video (视频生成)**：基于 `mlx-video`，支持 T2V（文生视频）、I2V（图生视频，支持首帧+尾帧双控）、A2V（音频驱动视频）。
+  - **Embeddings (文本向量化)**：基于 `mlx-embeddings`，提供文本转换向量服务。
+- **高效的模型缓存与调度**：LRU 缓存机制管理模型权重，支持 Prompt Cache 自动落盘与恢复。
+- **安全的 GPU 并发控制**：按推理类型（LLM/Embedding/Image/Audio/Video）独立的信号量调度，避免跨类型请求互相阻塞。
 
-## 🚀 安装
+## 安装
 
-> 要求：macOS 设备且配备 Apple Silicon (M1/M2/M3/M4) 芯片。
-
-建议使用虚拟环境：
+> 要求：macOS + Apple Silicon (M1/M2/M3/M4)
 
 ```bash
-# 克隆仓库
 git clone https://github.com/zhaopengme/MLXGateway.git
 cd MLXGateway
 
-# 创建虚拟环境并激活
 python -m venv .venv
 source .venv/bin/activate
 
-# 安装依赖
 pip install -e .
 ```
 
-## 💻 启动与配置
-
-可以直接通过命令行启动服务：
+## 启动
 
 ```bash
 mlxgateway --host 0.0.0.0 --port 8008 --log-level info
 ```
 
-`
+或使用 `start.sh`（推荐，从 `.env` 读取 API Key）：
 
-## Usage
-
-download model with huggingface cli 
 ```bash
+./start.sh
+```
+
+## 下载模型
+
+使用 HuggingFace CLI 预下载模型：
+
+```bash
+# LLM
 hf download mlx-community/Qwen3-4B-Instruct-2507-4bit
+
+# TTS
+hf download mlx-community/fish-audio-s2-pro-bf16
+
+# Embeddings
+hf download mlx-community/bge-m3-mlx-4bit
+
+# Video (LTX-2.3)
+hf download prince-canuma/LTX-2.3-distilled
 ```
 
-### Options
-
-```bash
-mlxgateway --host 0.0.0.0 --port 8008 --log-level debug --max-models 4 --model-cache-ttl 600
-```
-
-## API Examples
+## API 示例
 
 ### Chat Completions
 
@@ -69,7 +70,7 @@ curl http://localhost:8008/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
-    "model": "mlx-community/MiroThinker-1.7-mini-mlx-4Bit",
+    "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
     "messages": [{"role": "user", "content": "Hello!"}],
     "stream": true
   }'
@@ -82,27 +83,30 @@ curl -X POST http://localhost:8008/v1/audio/speech \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
-    "model": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16",
+    "model": "mlx-community/fish-audio-s2-pro-bf16",
     "input": "Hello, this is a speech synthesis test.",
-    "voice": "Serena",
+    "voice": "af_sky",
     "response_format": "wav"
   }' \
   --output speech.wav
 ```
 
-### Embeddings
+**声音克隆**：将参考音频放到 `ref/` 目录（如 `ref/myvoice.ogg`），`voice` 填文件名（不含扩展名）：
 
 ```bash
-curl http://localhost:8008/v1/embeddings \
+curl -X POST http://localhost:8008/v1/audio/speech \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
-    "model": "mlx-community/bge-m3-mlx-4bit",
-    "input": "Hello world"
-  }'
+    "model": "mlx-community/fish-audio-s2-pro-bf16",
+    "input": "这是一段声音克隆测试。",
+    "voice": "myvoice",
+    "response_format": "wav"
+  }' \
+  --output clone.wav
 ```
 
-Batch input:
+### Embeddings
 
 ```bash
 curl http://localhost:8008/v1/embeddings \
@@ -124,39 +128,133 @@ curl -X POST http://localhost:8008/v1/images/generations \
     "model": "black-forest-labs/FLUX.2-klein-4B",
     "prompt": "a cat sitting on a desk, studio lighting",
     "size": "1024x1024"
-  }' \
-  --output response.json
+  }'
 ```
 
+### Video Generation
 
-### 可用参数与环境变量配置
+**文生视频 (T2V)**：
 
-你可以通过命令行参数或同名的环境变量来配置网关行为：
+```bash
+curl -X POST http://localhost:8008/v1/videos/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "prompt": "Ocean waves crashing against rocks at golden hour, cinematic, slow motion, 4K",
+    "num_frames": 97,
+    "width": 768,
+    "height": 512
+  }'
+```
+
+**图生视频 - 首帧 (I2V)**：
+
+```bash
+curl -X POST http://localhost:8008/v1/videos/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "prompt": "The scene slowly comes to life with gentle movement, cinematic",
+    "image_url": "http://localhost:8008/static/first.jpeg",
+    "num_frames": 97
+  }'
+```
+
+**图生视频 - 首帧+尾帧 (I2V dual-frame)**：
+
+```bash
+curl -X POST http://localhost:8008/v1/videos/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "prompt": "Smooth transition between the two scenes, cinematic motion",
+    "image_url": "http://localhost:8008/static/first.jpeg",
+    "end_image_url": "http://localhost:8008/static/end.png",
+    "num_frames": 97
+  }'
+```
+
+**音频驱动视频 (A2V)**：
+
+```bash
+curl -X POST http://localhost:8008/v1/videos/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "prompt": "A band playing music on stage, dynamic camera, cinematic",
+    "audio_file_url": "http://localhost:8008/static/music.wav",
+    "num_frames": 97
+  }'
+```
+
+**A2V + I2V 组合（音频驱动 + 首尾帧控制）**：
+
+```bash
+curl -X POST http://localhost:8008/v1/videos/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "prompt": "The girl speaks while looking at the ocean, mouth moving naturally, wind blowing hair, Pixar 3D animation",
+    "image_url": "http://localhost:8008/static/first.jpeg",
+    "end_image_url": "http://localhost:8008/static/end.png",
+    "audio_file_url": "http://localhost:8008/static/speech.wav",
+    "num_frames": 97,
+    "width": 512,
+    "height": 320
+  }'
+```
+
+#### Video API 参数
+
+| 参数 | 默认值 | 说明 |
+|:---|:---|:---|
+| `prompt` | (必填) | 视频描述（建议用英文） |
+| `model` | `prince-canuma/LTX-2.3-distilled` | 视频模型 |
+| `width` / `height` | `512` | 分辨率（必须被 32 整除，上限 2048） |
+| `num_frames` | `97` | 帧数（必须为 1+8k，如 9/17/25/.../257） |
+| `fps` | `24` | 帧率 |
+| `pipeline` | `distilled` | 生成管线：`distilled`(快) / `dev`(高质量) / `dev-two-stage` / `dev-two-stage-hq` |
+| `cfg_scale` | `3.0` | CFG 引导强度（dev pipeline 生效） |
+| `seed` | 随机 | 随机种子 |
+| `image` / `image_url` | - | 首帧图片（base64 或 URL） |
+| `end_image` / `end_image_url` | - | 尾帧图片（base64 或 URL） |
+| `image_strength` | `1.0` | 图片条件强度 |
+| `audio` | `true` | 是否生成同步音频（A2V 模式自动关闭） |
+| `audio_file` / `audio_file_url` | - | A2V 输入音频（base64 或 URL） |
+| `audio_start_time` | `0.0` | A2V 音频起始偏移（秒） |
+| `response_format` | `url` | 返回格式：`url` 或 `b64_json` |
+| `tiling` | `auto` | VAE tiling 模式 |
+
+## 配置参数
 
 | CLI 参数 | 环境变量 | 说明 | 默认值 |
-| :--- | :--- | :--- | :--- |
-| `--host` | `HOST` | 监听的主机地址 | `127.0.0.1` |
-| `--port` | `PORT` | 监听的端口 | `8008` |
-| `--api-key` | `API_KEY` | 设置 API 密钥身份验证（可选） | 禁用 |
-| `--max-models` | `MAX_MODELS` | LLM/VLM 在内存中缓存的最大模型数量 | `4` |
-| `--model-cache-ttl` | `MODEL_CACHE_TTL` | 模型的空闲过期释放时间 (秒) | `600` |
-| `--max-concurrent` | `MAX_CONCURRENT` | 允许的 GPU 最大并行推理请求数 | `1` |
-| `--request-timeout` | `REQUEST_TIMEOUT` | 请求进入 GPU 对列的等待超时 (秒) | `300` |
-| `--ref-audio` | `REF_AUDIO_PATH` | TTS 声音克隆的参考音频目录或文件。请求指定的 `voice` 会在此目录下查找 `{voice}.wav` 或 `{voice}.ogg` 文件。 | `ref/` |
+|:---|:---|:---|:---|
+| `--host` | `HOST` | 监听地址 | `127.0.0.1` |
+| `--port` | `PORT` | 监听端口 | `8008` |
+| `--api-key` | `API_KEY` | API 密钥（可选） | 禁用 |
+| `--max-models` | `MAX_MODELS` | 最大缓存模型数 | `4` |
+| `--model-cache-ttl` | `MODEL_CACHE_TTL` | 模型空闲过期时间（秒） | `600` |
+| `--max-concurrent` | `MAX_CONCURRENT` | GPU 最大并行推理数 | `1` |
+| `--request-timeout` | `REQUEST_TIMEOUT` | GPU 队列等待超时（秒） | `300` |
+| `--ref-audio` | `REF_AUDIO_PATH` | TTS 参考音频目录 | `ref/` |
 
-## 🔌 API 接口文档
+## API 端点一览
 
-启动服务后，你可以直接访问 [http://127.0.0.1:8008/docs](http://127.0.0.1:8008/docs) 查看基于 Swagger UI 自动生成的交互式 API 文档。
+| 端点 | 说明 |
+|:---|:---|
+| `GET /health` | 健康检查 |
+| `GET /v1/models` | 列出可用模型 |
+| `POST /v1/chat/completions` | 对话补全（文本/多模态/流式） |
+| `POST /v1/embeddings` | 文本嵌入向量 |
+| `POST /v1/audio/transcriptions` | 语音转文字 (STT) |
+| `POST /v1/audio/speech` | 文字转语音 (TTS) |
+| `POST /v1/images/generations` | 文生图 |
+| `POST /v1/images/edits` | 图片编辑 |
+| `POST /v1/videos/generations` | 视频生成（T2V / I2V / A2V） |
+| `GET /static/...` | 静态文件（生成的图片/视频，无需认证） |
 
-主要的端点包括：
-- `GET /v1/models` - 列出本地 Hugging Face 缓存中可用的模型。
-- `POST /v1/chat/completions` - 对话补全（文本/多模态/流式）。
-- `POST /v1/embeddings` - 获取文本嵌入向量。
-- `POST /v1/audio/transcriptions` - 语音转文字。
-- `POST /v1/audio/speech` - 文字转语音。
-- `POST /v1/images/generations` - 文生图。
-- `POST /v1/images/edits` - 图生图/图片编辑。
+启动后访问 [http://127.0.0.1:8008/docs](http://127.0.0.1:8008/docs) 查看交互式 API 文档。
 
-## 📝 贡献
+## 贡献
 
-欢迎提交 Issue 和 Pull Request 改进代码！
+欢迎提交 Issue 和 Pull Request！

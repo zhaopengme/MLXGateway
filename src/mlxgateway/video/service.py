@@ -1,7 +1,5 @@
 import base64
-import ipaddress
 import random
-import socket
 import time
 import uuid
 from pathlib import Path
@@ -26,23 +24,12 @@ def _pipeline_enum(pipeline: VideoPipeline):
 
 
 def _validate_url(url: str) -> None:
-    """Reject non-HTTP schemes and private/internal IP addresses (SSRF protection).
-
-    Note: DNS rebinding can bypass this check (TOCTOU between gethostbyname
-    and urlretrieve). Acceptable for a local-network MLX gateway.
-    """
+    """Validate URL scheme. Only HTTP(S) URLs are allowed."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
-    hostname = parsed.hostname
-    if not hostname:
+    if not parsed.hostname:
         raise ValueError("Invalid URL: no hostname")
-    try:
-        ip = ipaddress.ip_address(socket.gethostbyname(hostname))
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
-            raise ValueError("URL points to a private/internal address")
-    except socket.gaierror:
-        raise ValueError(f"Cannot resolve hostname: {hostname}")
 
 
 _VALID_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}

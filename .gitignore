@@ -45,3 +45,4 @@ logs/
 start.sh
 .env
 static/
+ref/
