@@ -30,6 +30,11 @@ InferenceType = Literal["llm", "embedding", "image", "audio", "video"]
 # Per-type semaphores; initialized lazily on first use.
 _semaphores: dict[InferenceType, asyncio.Semaphore] = {}
 
+# Global lock for mx.clear_cache() -- must be held when clearing the MLX
+# Metal cache from any thread. Prevents concurrent clear_cache calls between
+# the main executor and the embedding executor.
+mlx_cache_lock = threading.Lock()
+
 # Main executor: LLM, Image, Audio, Video share this thread.
 _mlx_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="mlx-worker"

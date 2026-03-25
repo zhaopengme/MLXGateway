@@ -153,7 +153,7 @@ curl -X POST http://localhost:8008/v1/videos/generations \
   -H "Authorization: Bearer token" \
   -d '{
     "prompt": "The scene slowly comes to life with gentle movement, cinematic",
-    "image_url": "http://localhost:8008/static/first.jpeg",
+    "image_url": "http://localhost:8080/static/first.jpeg",
     "num_frames": 97
   }'
 ```
