@@ -8,7 +8,6 @@ from typing import Any, List, Optional
 import mlx.core as mx
 from mlx_lm.models.cache import load_prompt_cache, make_prompt_cache, save_prompt_cache
 
-from ..utils.gpu import mlx_cache_lock
 from ..utils.logger import logger
 
 # Minimum interval between automatic cache saves (seconds).
@@ -109,6 +108,5 @@ class BaseMLXModel:
 
         self.model = self.tokenizer = self.processor = self.prompt_cache = None
         self._is_loaded = False
-        with mlx_cache_lock:
-            mx.clear_cache()
+        mx.clear_cache()
         gc.collect()
