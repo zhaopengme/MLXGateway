@@ -101,12 +101,12 @@ class EmbeddingBatcher:
         task.add_done_callback(self._active_tasks.discard)
 
     async def _run_batch(self, batch_queue: List[_PendingItem], all_texts: List[str]):
-        from ..utils.gpu import gpu_inference, run_on_mlx_thread
+        from ..utils.gpu import gpu_inference, run_on_embedding_thread
         from .service import generate_embeddings
 
         try:
             async with gpu_inference("embedding"):
-                all_embeddings, total_tokens = await run_on_mlx_thread(
+                all_embeddings, total_tokens = await run_on_embedding_thread(
                     generate_embeddings, self.model_id, all_texts
                 )
 
