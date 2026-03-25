@@ -125,8 +125,16 @@ def create_app(enabled_routers: list[str] | None = None) -> FastAPI:
     return application
 
 
-# Default app instance (all routers) for single-process mode and uvicorn import
-app = create_app()
+# Lazy app instance -- only created when accessed (avoids loading all routers
+# in worker subprocesses that only need a subset).
+app: FastAPI | None = None
+
+
+def get_app() -> FastAPI:
+    global app
+    if app is None:
+        app = create_app()
+    return app
 
 
 def build_parser():
@@ -209,10 +217,12 @@ def start():
     )
     set_config(config)
 
-    # Recreate app with selected routers if not "all"
+    # Create app with selected routers
     global app
     if args.routers != "all":
         app = create_app(args.routers.split(","))
+    else:
+        app = get_app()
 
     app.add_middleware(
         CORSMiddleware,

@@ -77,21 +77,27 @@ class WorkerManager:
             "--max-concurrent", str(self.args.max_concurrent),
             "--request-timeout", str(self.args.request_timeout),
         ]
-        if self.args.api_key:
-            cmd.extend(["--api-key", self.args.api_key])
+        # Don't pass --api-key to workers; auth is handled at the proxy layer only.
         if self.args.ref_audio:
             cmd.extend(["--ref-audio", self.args.ref_audio])
+        cmd.extend(["--model-list-cache", str(self.args.model_list_cache)])
         return cmd
 
     def start_all(self):
         """Start all worker subprocesses."""
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        self._log_files: list = []
+
         for name, routers, offset in WORKERS:
             port = self.base_port + offset
             cmd = self._build_worker_cmd(name, routers, port)
             logger.info(f"Starting worker [{name}] on port {port}")
+            log_file = open(log_dir / f"worker-{name}.log", "a")
+            self._log_files.append(log_file)
             proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=log_file,
                 stderr=subprocess.STDOUT,
             )
             self.processes[name] = proc
@@ -134,44 +140,48 @@ class WorkerManager:
 
         client = await self.get_client()
 
-        # Forward headers (exclude host)
         headers = dict(request.headers)
         headers.pop("host", None)
 
         body = await request.body()
 
         try:
-            resp = await client.request(
+            # Always use a single streaming request to avoid double inference.
+            # Inspect content-type from response headers before reading body.
+            stream_ctx = client.stream(
                 method=request.method,
                 url=target_url,
                 content=body,
                 headers=headers,
             )
+            async with stream_ctx as resp:
+                content_type = resp.headers.get("content-type", "")
 
-            # Check if this is a streaming response (SSE)
-            content_type = resp.headers.get("content-type", "")
-            if "text/event-stream" in content_type:
-                async def stream_sse():
-                    async with client.stream(
-                        method=request.method,
-                        url=target_url,
-                        content=body,
-                        headers=headers,
-                    ) as stream_resp:
-                        async for chunk in stream_resp.aiter_bytes():
+                if "text/event-stream" in content_type:
+                    async def sse_gen():
+                        async for chunk in resp.aiter_bytes():
                             yield chunk
+                    return StreamingResponse(
+                        sse_gen(),
+                        media_type="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                    )
 
-                return StreamingResponse(
-                    stream_sse(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                # Non-streaming: read full body
+                resp_body = await resp.aread()
+
+                # Strip hop-by-hop headers that must not be forwarded
+                fwd_headers = {
+                    k: v for k, v in resp.headers.items()
+                    if k.lower() not in ("transfer-encoding", "connection", "keep-alive")
+                }
+
+                from fastapi.responses import Response
+                return Response(
+                    content=resp_body,
+                    status_code=resp.status_code,
+                    headers=fwd_headers,
                 )
-
-            return JSONResponse(
-                content=resp.json() if "json" in content_type else None,
-                status_code=resp.status_code,
-                headers=dict(resp.headers),
-            ) if "json" in content_type else fastapi_response(resp)
 
         except httpx.TimeoutException:
             return JSONResponse(
@@ -196,19 +206,39 @@ class WorkerManager:
                     logger.warning(f"Worker [{name}] did not stop, killing")
                     proc.kill()
 
+    def _restart_worker(self, name: str):
+        """Restart a single crashed worker."""
+        for wname, routers, offset in WORKERS:
+            if wname == name:
+                port = self.base_port + offset
+                cmd = self._build_worker_cmd(name, routers, port)
+                log_dir = Path("logs")
+                log_file = open(log_dir / f"worker-{name}.log", "a")
+                self._log_files.append(log_file)
+                proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+                self.processes[name] = proc
+                logger.info(f"Restarted worker [{name}] (PID {proc.pid}) on port {port}")
+                break
+
+    async def monitor_workers(self):
+        """Background task: check worker health and restart crashed ones."""
+        while True:
+            await asyncio.sleep(5)
+            for name, proc in list(self.processes.items()):
+                if proc.poll() is not None:
+                    logger.error(
+                        f"Worker [{name}] died (exit={proc.returncode}), restarting..."
+                    )
+                    self._restart_worker(name)
+
     async def close(self):
         if self._http_client:
             await self._http_client.aclose()
-
-
-def fastapi_response(resp: httpx.Response):
-    """Convert httpx Response to a generic FastAPI Response."""
-    from fastapi.responses import Response
-    return Response(
-        content=resp.content,
-        status_code=resp.status_code,
-        headers=dict(resp.headers),
-    )
+        for f in getattr(self, "_log_files", []):
+            try:
+                f.close()
+            except Exception:
+                pass
 
 
 def start_proxy(args):
@@ -239,7 +269,13 @@ def start_proxy(args):
         manager.start_all()
         await manager.wait_healthy(timeout=120)
         logger.info(f"All workers started. Proxy listening on {args.host}:{args.port}")
+        monitor_task = asyncio.create_task(manager.monitor_workers())
         yield
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
         logger.info("Shutting down proxy and workers...")
         manager.stop_all()
         await manager.close()
