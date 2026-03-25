@@ -28,6 +28,7 @@ dependencies = [
     # Utilities
     "rich>=13.9.4",
     "setproctitle>=1.3.3",
+    "httpx>=0.27.0",
 ]
 
 [project.scripts]

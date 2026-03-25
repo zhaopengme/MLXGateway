@@ -11,19 +11,31 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .audio.stt.router import router as stt_router
-from .audio.tts.router import router as tts_router
-from .chat.router import router as chat_router
 from .config import Config, set_config
-from .embeddings.router import router as embeddings_router
-from .images.router import router as images_router
-from .video.router import router as video_router
 from .middleware.auth import APIKeyAuthMiddleware
-from .utils.static import STATIC_DIR, ensure_dirs
 from .middleware.logging import RequestResponseLoggingMiddleware
-from .models.router import router as models_router
+from .utils.static import STATIC_DIR, ensure_dirs
 from .utils.gpu import get_gpu_semaphore
 from .utils.logger import logger, set_logger_level
+
+ROUTER_MAP = {
+    "chat": "mlxgateway.chat.router:router",
+    "models": "mlxgateway.models.router:router",
+    "embedding": "mlxgateway.embeddings.router:router",
+    "stt": "mlxgateway.audio.stt.router:router",
+    "tts": "mlxgateway.audio.tts.router:router",
+    "image": "mlxgateway.images.router:router",
+    "video": "mlxgateway.video.router:router",
+}
+
+
+def _import_router(dotted_path: str):
+    """Import a router from a dotted module:attribute path."""
+    module_path, attr = dotted_path.rsplit(":", 1)
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, attr)
+
 
 def _save_all_caches(force: bool = False) -> None:
     """Save prompt caches for all loaded LLM models. Runs on the MLX worker thread."""
@@ -49,26 +61,20 @@ async def _periodic_cache_saver(interval: int = 300):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize GPU semaphore on startup to avoid edge cases
     get_gpu_semaphore()
-    # Start background task for periodic prompt cache saves
     saver_task = asyncio.create_task(_periodic_cache_saver(interval=300))
     yield
-    # Cancel background saver
     saver_task.cancel()
     try:
         await saver_task
     except asyncio.CancelledError:
         pass
-    # Graceful shutdown
     logger.info("Shutting down MLX Gateway...")
-    # Drain embedding batchers
     try:
         from .embeddings.batcher import shutdown_all_batchers
         await shutdown_all_batchers()
     except Exception as e:
         logger.warning(f"Batcher shutdown error: {e}")
-    # Force-save all prompt caches on the MLX thread (with timeout)
     try:
         from .utils.gpu import run_on_mlx_thread
         import functools
@@ -82,110 +88,112 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Shutdown cleanup error: {e}")
 
-app = FastAPI(title="MLX Gateway", lifespan=lifespan)
+
+def create_app(enabled_routers: list[str] | None = None) -> FastAPI:
+    """Create a FastAPI app with selected routers.
+
+    Args:
+        enabled_routers: List of router names to register (e.g. ["chat", "embedding"]).
+                         None or empty means register all routers.
+    """
+    application = FastAPI(title="MLX Gateway", lifespan=lifespan)
+
+    @application.get("/health", tags=["health"])
+    async def health():
+        return {"status": "ok"}
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        logger.error(f"Validation error on {request.method} {request.url.path}")
+        logger.error(f"Validation errors: {exc.errors()}")
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": exc.errors(), "body": exc.body},
+        )
+
+    names = enabled_routers if enabled_routers else list(ROUTER_MAP.keys())
+    for name in names:
+        name = name.strip()
+        if name in ROUTER_MAP:
+            application.include_router(_import_router(ROUTER_MAP[name]))
+            logger.info(f"Registered router: {name}")
+
+    ensure_dirs()
+    from starlette.staticfiles import StaticFiles
+    application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    return application
 
 
-@app.get("/health", tags=["health"])
-async def health():
-    return {"status": "ok"}
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error(f"Validation error on {request.method} {request.url.path}")
-    logger.error(f"Request body: {await request.body()}")
-    logger.error(f"Validation errors: {exc.errors()}")
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors(), "body": exc.body},
-    )
-
-app.include_router(chat_router)
-app.include_router(models_router)
-app.include_router(images_router)
-app.include_router(tts_router)
-app.include_router(stt_router)
-app.include_router(embeddings_router)
-app.include_router(video_router)
-
-# Serve generated files (images, videos) as static assets -- no auth required.
-# ensure_dirs() is called explicitly so we don't rely on import side effects.
-ensure_dirs()
-from starlette.staticfiles import StaticFiles
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Default app instance (all routers) for single-process mode and uvicorn import
+app = create_app()
 
 
 def build_parser():
     parser = argparse.ArgumentParser(description="MLX Gateway")
     parser.add_argument(
-        "--host",
-        type=str,
-        default="127.0.0.1",
+        "--host", type=str, default="127.0.0.1",
         help="Host to bind the server to (default: 127.0.0.1)",
     )
     parser.add_argument(
-        "--port",
-        type=int,
-        default=8008,
+        "--port", type=int, default=8008,
         help="Port to bind the server to (default: 8008)",
     )
     parser.add_argument(
-        "--log-level",
-        type=str,
-        default="debug",
+        "--log-level", type=str, default="debug",
         choices=["debug", "info", "warning", "error", "critical"],
         help="Set the logging level (default: info)",
     )
     parser.add_argument(
-        "--model-cache-ttl",
-        type=int,
-        default=600,
+        "--model-cache-ttl", type=int, default=600,
         help="Model cache TTL in seconds (default: 600)",
     )
     parser.add_argument(
-        "--max-models",
-        type=int,
-        default=4,
+        "--max-models", type=int, default=4,
         help="Maximum number of models to cache (default: 4)",
     )
     parser.add_argument(
-        "--model-list-cache",
-        type=int,
-        default=600,
+        "--model-list-cache", type=int, default=600,
         help="Model list cache TTL in seconds (default: 600)",
     )
     parser.add_argument(
-        "--api-key",
-        type=str,
-        default=None,
+        "--api-key", type=str, default=None,
         help="API key for authentication (env: API_KEY). If not set, no auth required.",
     )
     parser.add_argument(
-        "--max-concurrent",
-        type=int,
-        default=1,
+        "--max-concurrent", type=int, default=1,
         help="Maximum concurrent GPU inference requests (default: 1)",
     )
     parser.add_argument(
-        "--request-timeout",
-        type=int,
-        default=300,
+        "--request-timeout", type=int, default=300,
         help="Timeout in seconds for requests waiting to acquire GPU (default: 300)",
     )
     parser.add_argument(
-        "--ref-audio",
-        type=str,
-        default=None,
+        "--ref-audio", type=str, default=None,
         help="Path to reference audio file for TTS voice cloning (env: REF_AUDIO_PATH)",
+    )
+    parser.add_argument(
+        "--routers", type=str, default="all",
+        help="Comma-separated list of routers to enable: "
+             "chat,embedding,stt,tts,image,video,models (default: all)",
+    )
+    parser.add_argument(
+        "--mode", type=str, default="single", choices=["single", "multi"],
+        help="Run mode: 'single' (one process) or 'multi' (6 worker processes behind proxy)",
     )
     return parser
 
 
 def start():
     setproctitle.setproctitle("MLXGateway")
-    
+
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.mode == "multi":
+        from .proxy import start_proxy
+        start_proxy(args)
+        return
 
     config = Config.from_env(
         host=args.host,
@@ -201,9 +209,11 @@ def start():
     )
     set_config(config)
 
-    # Middleware order: CORS (outermost) -> Logging -> Auth (innermost)
-    # Starlette executes middleware in reverse addition order (last-added runs first),
-    # so we add in this order: CORS, then Logging, then Auth.
+    # Recreate app with selected routers if not "all"
+    global app
+    if args.routers != "all":
+        app = create_app(args.routers.split(","))
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -216,16 +226,13 @@ def start():
 
     set_logger_level(logger, config.log_level)
 
-    logger.info(f"Starting MLX Gateway on {config.host}:{config.port}")
+    routers_str = args.routers if args.routers != "all" else "all"
+    logger.info(f"Starting MLX Gateway on {config.host}:{config.port} [routers={routers_str}]")
     logger.info(f"Model cache: max_size={config.max_models}, ttl={config.model_cache_ttl}s")
-    logger.info(f"Model list cache: ttl={config.model_list_cache_ttl}s")
-    logger.info(f"API key auth: {'enabled' if config.api_key else 'disabled'}")
     logger.info(f"GPU concurrency: max_concurrent={config.max_concurrent}, request_timeout={config.request_timeout}s")
-    if config.ref_audio_path:
-        logger.info(f"TTS reference audio: {config.ref_audio_path}")
 
     uvicorn.run(
-        "mlxgateway.main:app",
+        app,
         host=config.host,
         port=config.port,
         log_level=config.log_level,
@@ -235,4 +242,3 @@ def start():
 
 if __name__ == "__main__":
     start()
-
