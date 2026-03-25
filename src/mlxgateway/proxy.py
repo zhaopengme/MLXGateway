@@ -146,42 +146,49 @@ class WorkerManager:
         body = await request.body()
 
         try:
-            # Always use a single streaming request to avoid double inference.
-            # Inspect content-type from response headers before reading body.
+            # Peek at the response to determine if it's SSE streaming.
+            # For SSE, we must keep the httpx stream open for the entire
+            # duration of the response, so the generator owns the lifecycle.
             stream_ctx = client.stream(
                 method=request.method,
                 url=target_url,
                 content=body,
                 headers=headers,
             )
-            async with stream_ctx as resp:
-                content_type = resp.headers.get("content-type", "")
+            resp = await stream_ctx.__aenter__()
+            content_type = resp.headers.get("content-type", "")
 
-                if "text/event-stream" in content_type:
-                    async def sse_gen():
+            if "text/event-stream" in content_type:
+                async def sse_gen():
+                    try:
                         async for chunk in resp.aiter_bytes():
                             yield chunk
-                    return StreamingResponse(
-                        sse_gen(),
-                        media_type="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-                    )
+                    finally:
+                        await stream_ctx.__aexit__(None, None, None)
 
-                # Non-streaming: read full body
-                resp_body = await resp.aread()
-
-                # Strip hop-by-hop headers that must not be forwarded
-                fwd_headers = {
-                    k: v for k, v in resp.headers.items()
-                    if k.lower() not in ("transfer-encoding", "connection", "keep-alive")
-                }
-
-                from fastapi.responses import Response
-                return Response(
-                    content=resp_body,
-                    status_code=resp.status_code,
-                    headers=fwd_headers,
+                return StreamingResponse(
+                    sse_gen(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
                 )
+
+            # Non-streaming: read full body and close the stream
+            try:
+                resp_body = await resp.aread()
+            finally:
+                await stream_ctx.__aexit__(None, None, None)
+
+            fwd_headers = {
+                k: v for k, v in resp.headers.items()
+                if k.lower() not in ("transfer-encoding", "connection", "keep-alive")
+            }
+
+            from fastapi.responses import Response
+            return Response(
+                content=resp_body,
+                status_code=resp.status_code,
+                headers=fwd_headers,
+            )
 
         except httpx.TimeoutException:
             return JSONResponse(
