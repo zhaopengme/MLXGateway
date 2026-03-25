@@ -1,4 +1,3 @@
-import gc
 import threading
 from collections import OrderedDict
 from typing import List, Tuple
@@ -29,8 +28,8 @@ def _get_model(model_id: str):
             return _cache[model_id]
         if len(_cache) >= _MAX_CACHE:
             evict_key, _ = _cache.popitem(last=False)
-            mx.clear_cache()
-            gc.collect()
+            with mlx_cache_lock:
+                mx.clear_cache()
             logger.info(f"Evicted embedding model: {evict_key}")
         _cache[model_id] = (model, tokenizer)
     return model, tokenizer

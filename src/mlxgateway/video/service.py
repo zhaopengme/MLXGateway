@@ -158,7 +158,7 @@ class VideoService:
             "fps": request.fps,
             "output_path": output_path,
             "save_frames": False,
-            "verbose": True,
+            "verbose": False,
             "tiling": request.tiling.value,
             "stream": False,
             "audio": request.audio,

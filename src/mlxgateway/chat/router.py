@@ -1,6 +1,5 @@
 import asyncio
 import json
-import queue as thread_queue
 import threading
 import time
 import uuid
@@ -211,32 +210,29 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             prompt_toks = completion_toks = reasoning_toks = 0
             cancel_event = threading.Event()
 
-            # Thread-safe queue for cross-thread communication between the MLX
-            # worker thread (_produce) and the asyncio event loop (consumer).
-            q: thread_queue.Queue = thread_queue.Queue()
+            # asyncio.Queue is safe here because the MLX thread puts via
+            # loop.call_soon_threadsafe, which schedules put_nowait on the
+            # event loop thread -- no direct cross-thread Queue access.
+            async_q: asyncio.Queue = asyncio.Queue()
 
             def _produce():
-                """Run the sync stream generator on the MLX thread, pushing to q."""
+                """Run the sync stream generator on the MLX thread, pushing to async_q."""
                 try:
                     for item in generator.generate_stream(**gen_kwargs):
                         if cancel_event.is_set():
                             break
-                        q.put(item)
+                        loop.call_soon_threadsafe(async_q.put_nowait, item)
                 except Exception as exc:
-                    q.put(exc)
+                    loop.call_soon_threadsafe(async_q.put_nowait, exc)
                 finally:
-                    q.put(_SENTINEL)
-
-            async def _async_get():
-                """Get from thread-safe queue without blocking the event loop."""
-                return await asyncio.get_running_loop().run_in_executor(None, q.get)
+                    loop.call_soon_threadsafe(async_q.put_nowait, _SENTINEL)
 
             async with gpu_inference():
                 loop = asyncio.get_running_loop()
                 fut = loop.run_in_executor(get_mlx_executor(), _produce)
 
                 while True:
-                    response = await _async_get()
+                    response = await async_q.get()
                     if response is _SENTINEL:
                         break
                     if isinstance(response, Exception):
