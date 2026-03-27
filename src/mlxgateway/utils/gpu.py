@@ -47,7 +47,11 @@ T = TypeVar("T")
 
 
 def _get_semaphore(inference_type: InferenceType) -> asyncio.Semaphore:
-    """Return the semaphore for the given inference type, initializing on first call."""
+    """Return the semaphore for the given inference type, initializing on first call.
+
+    This is safe without a lock because it is only ever called from the asyncio
+    event loop thread (never from the MLX worker thread or other threads).
+    """
     if inference_type not in _semaphores:
         from ..config import get_config
         _semaphores[inference_type] = asyncio.Semaphore(get_config().max_concurrent)

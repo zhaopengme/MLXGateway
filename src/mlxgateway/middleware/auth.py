@@ -18,12 +18,16 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         if path in _PUBLIC_PATHS or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
             return await call_next(request)
 
+        # CORS preflight does not send Authorization; let inner middleware answer it.
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         auth = request.headers.get("Authorization", "")
 
         if auth.startswith("Bearer "):
             token = auth[7:]
         else:
-            token = auth
+            token = None
 
         if token != self.api_key:
             return JSONResponse(

@@ -28,8 +28,7 @@ def _get_model(model_id: str):
             return _cache[model_id]
         if len(_cache) >= _MAX_CACHE:
             evict_key, _ = _cache.popitem(last=False)
-            with mlx_cache_lock:
-                mx.clear_cache()
+            mx.clear_cache()
             logger.info(f"Evicted embedding model: {evict_key}")
         _cache[model_id] = (model, tokenizer)
     return model, tokenizer
@@ -45,7 +44,16 @@ def generate_embeddings(
     """
     model, tokenizer = _get_model(model_id)
 
-    inputs = tokenizer._tokenizer(
+    # mlx-embeddings exposes the underlying HuggingFace tokenizer as a private
+    # attribute. Use the public __call__ interface if available, falling back to
+    # the private attribute for backward compatibility.
+    hf_tokenizer = getattr(tokenizer, "tokenizer", None) or getattr(tokenizer, "_tokenizer", None)
+    if hf_tokenizer is None:
+        raise RuntimeError(
+            f"Cannot find underlying tokenizer for embedding model '{model_id}'. "
+            "The mlx-embeddings API may have changed."
+        )
+    inputs = hf_tokenizer(
         texts, return_tensors="mlx", padding=True, truncation=True, max_length=512
     )
     total_tokens = inputs["input_ids"].size

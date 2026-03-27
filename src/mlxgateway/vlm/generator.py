@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, Generator, List, Optional
 from urllib.parse import urlparse
 
-import requests
+import httpx
 from mlx_vlm import generate, stream_generate
 from mlx_vlm.prompt_utils import apply_chat_template
 
@@ -60,7 +60,7 @@ class VLMGenerator:
                 logger.warning(f"Blocked download from private/reserved address: {url}")
                 return None
 
-            response = requests.get(url, timeout=30)
+            response = httpx.get(url, timeout=30, follow_redirects=True)
             response.raise_for_status()
             
             suffix = Path(urlparse(url).path).suffix or '.tmp'

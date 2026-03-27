@@ -28,20 +28,17 @@ def _resolve_model_class(model_version: str):
         from mflux.models.z_image import ZImage
         return ZImage
     if "flux2-klein" in normalized:
-        from mflux.models.flux2.variants import Flux2Klein
+        from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
         return Flux2Klein
     if "flux2" in normalized:
-        from mflux.models.flux2.variants import Flux2Klein
+        from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
         return Flux2Klein
-    if "flux1-schnell" in normalized or "flux-schnell" in normalized:
-        from mflux.models.flux import Flux1Schnell
-        return Flux1Schnell
-    if "flux1-dev" in normalized or "flux-dev" in normalized:
-        from mflux.models.flux import Flux1Dev
-        return Flux1Dev
+    if "flux1" in normalized or "flux-" in normalized:
+        from mflux.models.flux.variants.txt2img.flux import Flux1
+        return Flux1
 
     logger.warning(f"Unknown model: {model_version}, defaulting to Flux2Klein")
-    from mflux.models.flux2.variants import Flux2Klein
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
     return Flux2Klein
 
 
@@ -49,19 +46,19 @@ def _resolve_edit_class(model_version: str):
     normalized = _normalize_model_name(model_version)
 
     if "flux2" in normalized and "edit" in normalized:
-        from mflux.models.flux2.variants import Flux2KleinEdit
+        from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
         return Flux2KleinEdit
     if "gpt-image" in normalized:
-        from mflux.models.flux2.variants import Flux2KleinEdit
+        from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
         return Flux2KleinEdit
     if "qwen" in normalized:
         from mflux.models.qwen.variants.edit import QwenImageEdit
         return QwenImageEdit
     if "kontext" in normalized:
-        from mflux.models.flux import Flux1Kontext
+        from mflux.models.flux.variants.kontext.flux_kontext import Flux1Kontext
         return Flux1Kontext
 
-    from mflux.models.flux2.variants import Flux2KleinEdit
+    from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
     return Flux2KleinEdit
 
 
@@ -123,8 +120,12 @@ def _get_model_lock(key: str) -> threading.Lock:
 
 def _evict_oldest(cache: Dict[str, object], label: str) -> None:
     if len(cache) >= _MAX_IMAGE_MODELS:
+        import gc
+        import mlx.core as mx
         oldest = next(iter(cache))
         cache.pop(oldest)
+        mx.clear_cache()
+        gc.collect()
         logger.info(f"Image {label} cache evicted: {oldest}")
 
 
@@ -246,11 +247,18 @@ class ImagesService:
             gen_kwargs = {
                 "seed": seed,
                 "prompt": request.prompt,
-                "image_paths": request.image_files,
                 "num_inference_steps": steps,
                 "width": width,
                 "height": height,
             }
+
+            # Kontext uses `image_path` (single); FLUX.2 Edit uses `image_paths` (list).
+            sig = inspect.signature(editor.generate_image)
+            if "image_path" in sig.parameters:
+                gen_kwargs["image_path"] = request.image_files[0]
+            else:
+                gen_kwargs["image_paths"] = request.image_files
+
             _add_guidance(editor, gen_kwargs, request.model, guidance)
 
             result = editor.generate_image(**gen_kwargs)

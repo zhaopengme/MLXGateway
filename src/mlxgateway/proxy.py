@@ -9,7 +9,6 @@ since they run in separate processes with independent Metal GPU contexts.
 """
 
 import asyncio
-import signal
 import subprocess
 import sys
 import time
@@ -22,6 +21,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
+from .middleware.corp import StaticCrossOriginResourcePolicyMiddleware
 from .utils.static import STATIC_DIR, ensure_dirs
 from .utils.logger import logger, set_logger_level
 
@@ -104,11 +104,11 @@ class WorkerManager:
             self.ports[name] = port
 
     async def wait_healthy(self, timeout: float = 60):
-        """Wait for all workers to respond to /health."""
+        """Wait for all workers to respond to /health, each with its own timeout."""
         client = httpx.AsyncClient()
-        deadline = time.monotonic() + timeout
         for name, port in self.ports.items():
             url = f"http://127.0.0.1:{port}/health"
+            deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 try:
                     resp = await client.get(url, timeout=2)
@@ -141,6 +141,12 @@ class WorkerManager:
         client = await self.get_client()
 
         headers = dict(request.headers)
+        # Preserve the original client-facing host so workers can build correct
+        # public URLs for generated static files (images, videos).
+        original_host = request.headers.get("host", "")
+        original_scheme = request.url.scheme
+        headers["x-forwarded-host"] = original_host
+        headers["x-forwarded-proto"] = original_scheme
         headers.pop("host", None)
 
         body = await request.body()
@@ -156,26 +162,29 @@ class WorkerManager:
                 headers=headers,
             )
             resp = await stream_ctx.__aenter__()
-            content_type = resp.headers.get("content-type", "")
-
-            if "text/event-stream" in content_type:
-                async def sse_gen():
-                    try:
-                        async for chunk in resp.aiter_bytes():
-                            yield chunk
-                    finally:
-                        await stream_ctx.__aexit__(None, None, None)
-
-                return StreamingResponse(
-                    sse_gen(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-                )
-
-            # Non-streaming: read full body and close the stream
             try:
+                content_type = resp.headers.get("content-type", "")
+
+                if "text/event-stream" in content_type:
+                    async def sse_gen():
+                        try:
+                            async for chunk in resp.aiter_bytes():
+                                yield chunk
+                        finally:
+                            await stream_ctx.__aexit__(None, None, None)
+
+                    return StreamingResponse(
+                        sse_gen(),
+                        media_type="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                    )
+
+                # Non-streaming: read full body and close the stream
                 resp_body = await resp.aread()
-            finally:
+            except Exception:
+                await stream_ctx.__aexit__(None, None, None)
+                raise
+            else:
                 await stream_ctx.__aexit__(None, None, None)
 
             fwd_headers = {
@@ -312,14 +321,15 @@ def start_proxy(args):
     from .middleware.auth import APIKeyAuthMiddleware
     from fastapi.middleware.cors import CORSMiddleware
 
+    proxy_app.add_middleware(StaticCrossOriginResourcePolicyMiddleware)
+    if config.api_key:
+        proxy_app.add_middleware(APIKeyAuthMiddleware, api_key=config.api_key)
     proxy_app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    if config.api_key:
-        proxy_app.add_middleware(APIKeyAuthMiddleware, api_key=config.api_key)
 
     logger.info(f"Starting MLX Gateway [multi-process] on {config.host}:{config.port}")
     logger.info(f"Workers: {', '.join(f'{name}:{base_port+offset}' for name, _, offset in WORKERS)}")

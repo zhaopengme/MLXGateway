@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 class FunctionCall(BaseModel):
     name: str
@@ -85,6 +85,8 @@ class Tool(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     model: str = Field(..., description="ID of the model to use")
     messages: List[ChatMessage]
     temperature: Optional[float] = Field(1.0, ge=0, le=2)
@@ -95,9 +97,6 @@ class ChatCompletionRequest(BaseModel):
     
     enable_cache: Optional[bool] = Field(None, description="Enable prompt caching")
     max_kv_size: Optional[int] = Field(None, description="Maximum KV cache size", ge=0)
-
-    class Config:
-        extra = "allow"
 
     def get_extra_params(self) -> Dict[str, Any]:
         standard_fields = {

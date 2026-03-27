@@ -4,7 +4,14 @@ from typing import Optional
 
 
 def _env_int(key: str, default: int) -> int:
-    return int(os.getenv(key, str(default)))
+    raw = os.getenv(key, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(
+            f"Environment variable {key}={raw!r} is not a valid integer. "
+            f"Expected an integer, e.g. {key}={default}"
+        )
 
 
 def _env_str(key: str, default: str) -> str:
@@ -68,7 +75,7 @@ class Config:
             model_list_cache_ttl=model_list_cache_ttl if model_list_cache_ttl is not None else _env_int("MODEL_LIST_CACHE_TTL", 600),
             api_key=api_key if api_key is not None else os.getenv("API_KEY"),
             default_max_kv_size=default_max_kv_size if default_max_kv_size is not None else (
-                int(os.getenv("DEFAULT_MAX_KV_SIZE")) if os.getenv("DEFAULT_MAX_KV_SIZE") else None
+                _env_int("DEFAULT_MAX_KV_SIZE", 0) if os.getenv("DEFAULT_MAX_KV_SIZE") else None
             ),
             enable_cache_by_default=enable_cache_by_default if enable_cache_by_default is not None else parsed_enable_cache,
             max_concurrent=resolved_max_concurrent,

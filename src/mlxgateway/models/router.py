@@ -92,10 +92,22 @@ class AudioScanner(ModelScanner):
         return any(pattern in repo_lower for pattern in self._patterns)
 
 
+class GGUFScanner(ModelScanner):
+    """Scans HuggingFace cache for repos that contain .gguf files."""
+
+    @property
+    def name(self) -> str:
+        return "GGUF"
+
+    def should_include(self, repo, revision) -> bool:
+        return any(f.file_name.lower().endswith(".gguf") for f in revision.files)
+
+
 # Model scanner registry
 SCANNERS: List[ModelScanner] = [
     LLMScanner(),
     AudioScanner(),
+    GGUFScanner(),
 ]
 
 
@@ -145,24 +157,43 @@ def get_models(ttl: int) -> ModelList:
 
     with _lock:
         now = time.time()
-
         if _cache:
             cached_list, cached_at = _cache
             if now - cached_at < ttl:
                 logger.debug(f"Model cache hit (age: {now - cached_at:.1f}s)")
                 from .cache import get_model_cache
                 loaded_ids = set(get_model_cache().get_loaded_model_ids())
-                for model in cached_list.data:
-                    model.loaded = model.id in loaded_ids
-                return cached_list
+                # Return a copy with updated loaded status to avoid mutating the cached objects.
+                updated_data = [
+                    Model(id=m.id, created=m.created, owned_by=m.owned_by, loaded=m.id in loaded_ids)
+                    for m in cached_list.data
+                ]
+                return ModelList(data=updated_data)
 
-        logger.info("Scanning HuggingFace cache...")
-        models = scan_models(SCANNERS)
-        
-        model_list = ModelList(data=models)
-        _cache = (model_list, now)
+    # Scan outside the lock: reading the HuggingFace cache can be slow and
+    # must not block concurrent requests that hit the cache-hit path above.
+    logger.info("Scanning HuggingFace cache...")
+    models = scan_models(SCANNERS)
+    model_list = ModelList(data=models)
 
-        return model_list
+    with _lock:
+        now = time.time()
+        # Another coroutine may have populated the cache while we were scanning;
+        # only update if ours is fresher (i.e. the slot is empty or still stale).
+        if not _cache or now - _cache[1] >= ttl:
+            _cache = (model_list, now)
+        else:
+            # Use the fresher result from the other coroutine.
+            cached_list, _ = _cache
+            from .cache import get_model_cache
+            loaded_ids = set(get_model_cache().get_loaded_model_ids())
+            updated_data = [
+                Model(id=m.id, created=m.created, owned_by=m.owned_by, loaded=m.id in loaded_ids)
+                for m in cached_list.data
+            ]
+            return ModelList(data=updated_data)
+
+    return model_list
 
 
 @router.get("/models", response_model=ModelList)

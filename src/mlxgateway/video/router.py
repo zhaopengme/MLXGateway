@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
-from ..utils.static import TEMP_DIR
+from ..utils.static import TEMP_DIR, get_base_url
 from .schema import VideoGenerationRequest, VideoGenerationResponse, VideoPipeline, VideoTiling
 from .service import VideoService, resolve_media
 
@@ -50,7 +50,7 @@ async def create_video(
             f"Video generation request [{mode}]: model={request.model}, "
             f"{request.width}x{request.height}, frames={request.num_frames}"
         )
-        base_url = str(http_request.base_url).rstrip("/")
+        base_url = get_base_url(http_request)
 
         if has_any_image or has_audio_input:
             first_image_path, last_image_path, audio_file_path = await asyncio.to_thread(
@@ -196,7 +196,7 @@ async def create_video_upload(
         except (ValidationError, ValueError) as e:
             raise ValueError(str(e)) from e
 
-        base_url = str(http_request.base_url).rstrip("/")
+        base_url = get_base_url(http_request)
 
         async with gpu_inference("video"):
             video_obj = await run_on_mlx_thread(

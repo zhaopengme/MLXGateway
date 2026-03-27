@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from .config import Config, set_config
 from .middleware.auth import APIKeyAuthMiddleware
+from .middleware.corp import StaticCrossOriginResourcePolicyMiddleware
 from .middleware.logging import RequestResponseLoggingMiddleware
 from .utils.static import STATIC_DIR, ensure_dirs
 from .utils.gpu import get_gpu_semaphore
@@ -51,24 +52,42 @@ def _save_all_caches(force: bool = False) -> None:
 async def _periodic_cache_saver(interval: int = 300):
     """Background task: save all loaded model prompt caches every `interval` seconds."""
     from .utils.gpu import run_on_mlx_thread
+    await asyncio.sleep(30)  # Short initial delay before first save
     while True:
-        await asyncio.sleep(interval)
         try:
             await run_on_mlx_thread(_save_all_caches)
         except Exception as e:
             logger.warning(f"Periodic cache saver error: {e}")
+        await asyncio.sleep(interval)
+
+
+async def _periodic_static_cleanup(interval: int = 3600, max_age_seconds: int = 3600):
+    """Background task: delete generated images/videos/temp files older than max_age_seconds."""
+    from .utils.static import cleanup_old_files
+    await asyncio.sleep(60)  # Wait a minute before first run
+    while True:
+        try:
+            removed = cleanup_old_files(max_age_seconds)
+            if removed:
+                logger.info(f"Static cleanup removed {removed} old file(s)")
+        except Exception as e:
+            logger.warning(f"Static cleanup error: {e}")
+        await asyncio.sleep(interval)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_gpu_semaphore()
     saver_task = asyncio.create_task(_periodic_cache_saver(interval=300))
+    cleanup_task = asyncio.create_task(_periodic_static_cleanup(interval=3600, max_age_seconds=3600))
     yield
     saver_task.cancel()
-    try:
-        await saver_task
-    except asyncio.CancelledError:
-        pass
+    cleanup_task.cancel()
+    for task in (saver_task, cleanup_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     logger.info("Shutting down MLX Gateway...")
     try:
         from .embeddings.batcher import shutdown_all_batchers
@@ -148,7 +167,7 @@ def build_parser():
         help="Port to bind the server to (default: 8008)",
     )
     parser.add_argument(
-        "--log-level", type=str, default="debug",
+        "--log-level", type=str, default="info",
         choices=["debug", "info", "warning", "error", "critical"],
         help="Set the logging level (default: info)",
     )
@@ -224,15 +243,19 @@ def start():
     else:
         app = get_app()
 
+    # Innermost first: CORP on /static/* so COEP editors (e.g. FFmpeg.wasm) can embed assets.
+    app.add_middleware(StaticCrossOriginResourcePolicyMiddleware)
+    # CORSMiddleware must be added last so it runs first and answers CORS preflight
+    # (OPTIONS without Authorization) before APIKeyAuthMiddleware rejects the request.
+    if config.api_key:
+        app.add_middleware(APIKeyAuthMiddleware, api_key=config.api_key)
+    app.add_middleware(RequestResponseLoggingMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(RequestResponseLoggingMiddleware)
-    if config.api_key:
-        app.add_middleware(APIKeyAuthMiddleware, api_key=config.api_key)
 
     set_logger_level(logger, config.log_level)
 

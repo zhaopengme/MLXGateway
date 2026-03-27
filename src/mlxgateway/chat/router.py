@@ -148,8 +148,8 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
         gen_kwargs = {
             "messages": messages,
             "max_tokens": request.max_tokens,
-            "temperature": request.temperature or 1.0,
-            "top_p": request.top_p or 1.0,
+            "temperature": request.temperature if request.temperature is not None else 1.0,
+            "top_p": request.top_p if request.top_p is not None else 1.0,
         }
         
         if not use_vlm_generator:

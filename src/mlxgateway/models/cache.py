@@ -79,6 +79,7 @@ class ModelCache:
 
         with key_lock:
             # Double-check after acquiring per-key lock
+            to_unload = []
             with self._lock:
                 if key in self._cache:
                     self._access_times[key] = time.time()
@@ -87,8 +88,13 @@ class ModelCache:
                 if self.max_size > 0 and len(self._cache) >= self.max_size:
                     candidates = {k: t for k, t in self._access_times.items() if k in self._cache}
                     if candidates:
-                        for m in self._evict(min(candidates, key=candidates.get), "Evicted LLM"):
-                            m.unload()
+                        to_unload = self._evict(min(candidates, key=candidates.get), "Evicted LLM")
+
+            # Unload outside the lock: involves MLX GPU ops that must not block cache access.
+            # Safe because get_model is always dispatched via run_on_mlx_thread, so this
+            # already executes on the MLX worker thread.
+            for m in to_unload:
+                m.unload()
 
             # Determine cache settings
             final_use_cache = use_cache and self.config.enable_cache_by_default
@@ -175,12 +181,18 @@ class ModelCache:
                     self._access_times[key] = time.time()
                     return self._vlm_cache[key]
                 
+                to_unload = []
                 if self.max_size > 0 and len(self._vlm_cache) + len(self._cache) >= self.max_size:
                     all_model_keys = set(self._cache) | set(self._vlm_cache)
                     candidates = {k: t for k, t in self._access_times.items() if k in all_model_keys}
                     if candidates:
-                        for m in self._evict(min(candidates, key=candidates.get), "Evicted"):
-                            m.unload()
+                        to_unload = self._evict(min(candidates, key=candidates.get), "Evicted")
+
+            # Unload outside the lock: involves MLX GPU ops that must not block cache access.
+            # Safe because get_vlm_model is always dispatched via run_on_mlx_thread, so this
+            # already executes on the MLX worker thread.
+            for m in to_unload:
+                m.unload()
 
             from ..vlm.loader import VLMModel
             model = VLMModel.load(model_id, adapter_path)

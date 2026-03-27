@@ -10,7 +10,13 @@ from fastapi.responses import JSONResponse
 from ..models.error import ErrorDetail, ErrorResponse
 from ..utils.gpu import gpu_inference, run_on_mlx_thread
 from ..utils.logger import logger
-from .schema import ImageEditRequest, ImageGenerationRequest, ImageGenerationResponse, ResponseFormat
+from ..utils.static import get_base_url
+from .schema import (
+    ImageEditRequest,
+    ImageGenerationRequest,
+    ImageGenerationResponse,
+    ResponseFormat,
+)
 from .service import ImagesService
 
 router = APIRouter(prefix="/v1", tags=["images"])
@@ -19,21 +25,21 @@ _service = ImagesService()
 
 
 @router.post("/images/generations")
-async def create_image(request: ImageGenerationRequest, http_request: Request) -> ImageGenerationResponse:
+async def create_image(
+    request: ImageGenerationRequest, http_request: Request
+) -> ImageGenerationResponse:
     try:
-        logger.info(f"Image generation request: model={request.model}, size={request.size}, n={request.n}")
-        # Build base URL for serving generated images
-        base_url = str(http_request.base_url).rstrip("/")
+        logger.info(
+            f"Image generation request: model={request.model}, size={request.size}, n={request.n}"
+        )
+        base_url = get_base_url(http_request)
 
         async with gpu_inference("image"):
             images = await run_on_mlx_thread(
                 _service.generate_images, request, base_url
             )
-        
-        return ImageGenerationResponse(
-            created=int(time.time()), 
-            data=images
-        )
+
+        return ImageGenerationResponse(created=int(time.time()), data=images)
 
     except asyncio.TimeoutError:
         return JSONResponse(
@@ -52,11 +58,9 @@ async def create_image(request: ImageGenerationRequest, http_request: Request) -
             status_code=400,
             content=ErrorResponse(
                 error=ErrorDetail(
-                    message=str(ve),
-                    type="invalid_request_error",
-                    code="invalid_value"
+                    message=str(ve), type="invalid_request_error", code="invalid_value"
                 )
-            ).model_dump()
+            ).model_dump(),
         )
     except Exception as e:
         logger.error(f"Image generation error: {e}", exc_info=True)
@@ -66,9 +70,9 @@ async def create_image(request: ImageGenerationRequest, http_request: Request) -
                 error=ErrorDetail(
                     message="An unexpected error occurred while generating images.",
                     type="server_error",
-                    code="internal_error"
+                    code="internal_error",
                 )
-            ).model_dump()
+            ).model_dump(),
         )
 
 
@@ -84,14 +88,15 @@ async def edit_image(
     guidance: Optional[float] = Form(default=None),
     seed: Optional[int] = Form(default=None),
     quantize: Optional[int] = Form(default=8),
+    model_path: Optional[str] = Form(default=None),
     mask: Optional[UploadFile] = File(default=None),
 ) -> ImageGenerationResponse:
     """
     Creates an edited image given one or more source images and a prompt.
-    
+
     Compatible with OpenAI Images API /v1/images/edits endpoint.
     Supports FLUX.2, Qwen Edit, and Kontext editing models.
-    
+
     Args:
         prompt: Text description of desired edits (max 32000 characters)
         image: One or more images to edit (up to 16 for FLUX.2)
@@ -104,22 +109,23 @@ async def edit_image(
         guidance: Guidance scale (default 2.5 for editing)
         seed: Random seed for reproducibility
         quantize: Quantization level (4 or 8, default 8)
+        model_path: Path to local GGUF model file (for qwen-edit models)
     """
     temp_dir = None
     temp_files = []
-    
+
     # Get form data to extract image files (handles 'image[]' field name)
     form = await request.form()
-    
+
     # Extract images from form (could be 'image' or 'image[]')
     image_files = []
     for key in form.keys():
-        if 'image' in key.lower():
-            value = form.getlist(key) if key.endswith('[]') else [form.get(key)]
+        if "image" in key.lower():
+            value = form.getlist(key) if key.endswith("[]") else [form.get(key)]
             for item in value:
-                if hasattr(item, 'filename'):
+                if hasattr(item, "filename"):
                     image_files.append(item)
-    
+
     if not image_files:
         return JSONResponse(
             status_code=400,
@@ -128,20 +134,21 @@ async def edit_image(
                     message="At least one image file is required",
                     type="invalid_request_error",
                     param="image",
-                    code="missing_required_parameter"
+                    code="missing_required_parameter",
                 )
-            ).model_dump()
+            ).model_dump(),
         )
-    
-    logger.info(f"Image Edit: model={model}, images={len(image_files)}, n={n}, size={size}, steps={steps}, guidance={guidance}, seed={seed}, quantize={quantize}")
-    
-    # Build base URL for serving generated images
-    base_url = str(request.base_url).rstrip("/")
+
+    logger.info(
+        f"Image Edit: model={model}, images={len(image_files)}, n={n}, size={size}, steps={steps}, guidance={guidance}, seed={seed}, quantize={quantize}"
+    )
+
+    base_url = get_base_url(request)
 
     try:
         # Create temporary directory for uploaded images
         temp_dir = Path(tempfile.mkdtemp(prefix="mlxgateway_edit_"))
-        
+
         # Save uploaded images to temporary files
         image_paths = []
         for idx, img_file in enumerate(image_files):
@@ -151,8 +158,10 @@ async def edit_image(
                 f.write(content)
             image_paths.append(str(temp_path))
             temp_files.append(temp_path)
-            logger.info(f"Saved upload {idx+1}/{len(image_files)}: {img_file.filename}")
-        
+            logger.info(
+                f"Saved upload {idx + 1}/{len(image_files)}: {img_file.filename}"
+            )
+
         # Save mask if provided (for DALL-E 2 compatibility)
         mask_path = None
         if mask:
@@ -162,7 +171,7 @@ async def edit_image(
                 f.write(content)
             temp_files.append(mask_path)
             logger.info(f"Saved mask: {mask.filename}")
-        
+
         # Validate response format
         try:
             resp_format = ResponseFormat(response_format)
@@ -174,11 +183,11 @@ async def edit_image(
                         message=f"Invalid response_format: {response_format}",
                         type="invalid_request_error",
                         param="response_format",
-                        code="invalid_value"
+                        code="invalid_value",
                     )
-                ).model_dump()
+                ).model_dump(),
             )
-        
+
         # Build request object with extra parameters
         extra_params = {}
         if steps is not None:
@@ -189,7 +198,9 @@ async def edit_image(
             extra_params["seed"] = seed
         if quantize is not None:
             extra_params["quantize"] = quantize
-        
+        if model_path is not None:
+            extra_params["model_path"] = model_path
+
         edit_request = ImageEditRequest(
             prompt=prompt,
             model=model,
@@ -198,19 +209,16 @@ async def edit_image(
             response_format=resp_format,
             image_files=image_paths,
             mask_file=mask_path,
-            **extra_params
+            **extra_params,
         )
-        
+
         async with gpu_inference("image"):
             images = await run_on_mlx_thread(
                 _service.edit_images, edit_request, base_url
             )
 
-        return ImageGenerationResponse(
-            created=int(time.time()), 
-            data=images
-        )
-    
+        return ImageGenerationResponse(created=int(time.time()), data=images)
+
     except asyncio.TimeoutError:
         return JSONResponse(
             status_code=503,
@@ -228,11 +236,9 @@ async def edit_image(
             status_code=400,
             content=ErrorResponse(
                 error=ErrorDetail(
-                    message=str(ve),
-                    type="invalid_request_error",
-                    code="invalid_value"
+                    message=str(ve), type="invalid_request_error", code="invalid_value"
                 )
-            ).model_dump()
+            ).model_dump(),
         )
     except Exception as e:
         logger.error(f"Image edit error: {e}", exc_info=True)
@@ -242,9 +248,9 @@ async def edit_image(
                 error=ErrorDetail(
                     message="An unexpected error occurred while editing images.",
                     type="server_error",
-                    code="internal_error"
+                    code="internal_error",
                 )
-            ).model_dump()
+            ).model_dump(),
         )
     finally:
         # Cleanup temporary files
@@ -255,7 +261,7 @@ async def edit_image(
                         temp_file.unlink()
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp file {temp_file}: {e}")
-        
+
         # Cleanup temporary directory
         if temp_dir and temp_dir.exists():
             try:

@@ -17,6 +17,9 @@ _MAX_STREAM_LOG_BYTES = 64 * 1024
 # Paths whose response bodies are never logged (too large / binary).
 _SKIP_RESPONSE_BODY_PREFIXES = ("/v1/embeddings", "/v1/images", "/v1/audio", "/v1/videos", "/v1/chat", "/static/")
 
+# Paths that use multipart/form-data uploads -- log headers only, not the raw binary body.
+_SKIP_REQUEST_BODY_PREFIXES = ("/v1/images/edits", "/v1/audio/transcriptions", "/v1/audio/speech", "/v1/videos/generations/upload")
+
 
 def format_body(body: str, max_bytes: int = _MAX_LOG_BODY_BYTES) -> str:
     """Pretty-print JSON, truncating if the result exceeds max_bytes."""
@@ -36,18 +39,26 @@ def _should_skip_response_body(path: str) -> bool:
     return any(path.startswith(p) for p in _SKIP_RESPONSE_BODY_PREFIXES)
 
 
+def _should_skip_request_body(path: str) -> bool:
+    return any(path.startswith(p) for p in _SKIP_REQUEST_BODY_PREFIXES)
+
+
 class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if _should_skip_response_body(request.url.path):
-            return await call_next(request)
+        skip_body = _should_skip_response_body(request.url.path)
 
         body = await self._get_request_body(request)
         request_id = uuid.uuid4().hex[:8]
 
-        logger.info(
-            f"Request [{request_id}]: {request.method} {request.url}\n"
-            f"Body:\n{format_body(body)}",
-        )
+        if _should_skip_request_body(request.url.path):
+            logger.info(
+                f"Request [{request_id}]: {request.method} {request.url} [multipart body omitted]",
+            )
+        else:
+            logger.info(
+                f"Request [{request_id}]: {request.method} {request.url}\n"
+                f"Body:\n{format_body(body)}",
+            )
 
         is_stream = False
         try:
@@ -60,8 +71,6 @@ class RequestResponseLoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         response = await call_next(request)
         process_time = time.time() - start_time
-
-        skip_body = _should_skip_response_body(request.url.path)
 
         if is_stream:
             logger.info(
