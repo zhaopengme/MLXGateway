@@ -14,7 +14,7 @@ const revokeIfBlob = (u: string | undefined) => {
 
 const IMAGE_EDIT_CROPPER_TEMPLATE =
   '<cropper-canvas background>' +
-  '<cropper-image crossorigin="anonymous" scalable></cropper-image>' +
+  '<cropper-image crossorigin="anonymous" scalable translatable></cropper-image>' +
   '<cropper-handle action="select" plain></cropper-handle>' +
   '<cropper-selection movable resizable zoomable>' +
   '<cropper-grid role="grid" bordered covered></cropper-grid>' +
@@ -383,7 +383,7 @@ export function ImageEditModal({ isDark }: Props) {
           <h2 id="image-edit-title" className="text-sm font-semibold">
             Edit image{' '}
             <span className="text-[10px] font-normal opacity-70">
-              (double-click on canvas · scroll to zoom image)
+              (double-click on canvas · drag to pan · scroll to zoom)
             </span>
           </h2>
           <button
