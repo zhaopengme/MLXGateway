@@ -2,9 +2,9 @@
 export const DEFAULT_IMAGE_MODEL = 'black-forest-labs/FLUX.2-klein-4B'
 export const DEFAULT_VIDEO_MODEL = 'prince-canuma/LTX-2.3-distilled'
 export const DEFAULT_CHAT_MODEL = 'mlx-community/Qwen3-4B-Instruct-2507-4bit'
-export const DEFAULT_TTS_MODEL = 'mlx-community/fish-audio-s2-pro-bf16'
+export const DEFAULT_TTS_MODEL = 'mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16'
 /** User should pick from GET /v1/models when available */
-export const DEFAULT_STT_MODEL = 'mlx-community/whisper-large-v3-mlx'
+export const DEFAULT_STT_MODEL = 'mlx-community/whisper-large-v3-turbo-asr-fp16'
 
 export const VIDEO_PIPELINES = [
   'distilled',

@@ -182,7 +182,7 @@ export function Sidebar({ isDark }: Props) {
         data: {
           title: 'TTS',
           model: DEFAULT_TTS_MODEL,
-          voice: 'af_sky',
+          voice: 'liuyifei',
           ttsFormat: 'wav',
           prompt: '',
           status: 'idle',

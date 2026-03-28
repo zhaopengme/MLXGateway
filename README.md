@@ -162,7 +162,7 @@ curl -X POST http://localhost:8008/v1/audio/speech \
   -d '{
     "model": "mlx-community/fish-audio-s2-pro-bf16",
     "input": "Hello, this is a speech synthesis test.",
-    "voice": "af_sky",
+    "voice": "liuyifei",
     "response_format": "wav"
   }' \
   --output speech.wav

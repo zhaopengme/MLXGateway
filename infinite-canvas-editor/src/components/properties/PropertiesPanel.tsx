@@ -314,19 +314,6 @@ export function PropertiesPanel({ isDark }: Props) {
                     /flux|kontext|qwen|image|mflux|dall/i.test(id) || id.includes('black-forest')
                   }
                 />
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(node.data.useImageEdit)}
-                    onChange={(e) =>
-                      updateNode(node.id, { data: { ...node.data, useImageEdit: e.target.checked } })
-                    }
-                    className="rounded"
-                  />
-                  <span className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>
-                    Use /v1/images/edits (needs incoming image nodes)
-                  </span>
-                </label>
                 <label className="block space-y-1">
                   <span className={isDark ? 'text-zinc-500' : 'text-zinc-500'}>Size</span>
                   <select
@@ -577,7 +564,7 @@ export function PropertiesPanel({ isDark }: Props) {
                 <label className="block space-y-1">
                   <span className={isDark ? 'text-zinc-500' : 'text-zinc-500'}>voice</span>
                   <input
-                    value={node.data.voice ?? 'af_sky'}
+                    value={node.data.voice ?? 'liuyifei'}
                     onChange={(e) =>
                       updateNode(node.id, { data: { ...node.data, voice: e.target.value } })
                     }

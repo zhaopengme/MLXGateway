@@ -70,15 +70,25 @@ export function ImageEditModal({ isDark }: Props) {
   const [err, setErr] = useState<string | null>(null)
   const [naturalW, setNaturalW] = useState<number | null>(null)
   const [naturalH, setNaturalH] = useState<number | null>(null)
-  const [cropReadout, setCropReadout] = useState({ x: 0, y: 0, w: 0, h: 0 })
-  const [resizeW, setResizeW] = useState(0)
-  const [resizeH, setResizeH] = useState(0)
-  const [resizeLockRatio, setResizeLockRatio] = useState(false)
-  const [outputQuality, setOutputQuality] = useState(0.85)
-  const [outputFormat, setOutputFormat] = useState<ImageProcessOutputFormat>('image/jpeg')
+  
+  // 裁剪状态
+  const [cropParams, setCropParams] = useState({ x: 0, y: 0, width: 0, height: 0 })
+  
+  // 调整大小状态
+  const [resizeParams, setResizeParams] = useState({ width: 0, height: 0, lockRatio: false })
+  
+  // 输出参数
+  const [outputParams, setOutputParams] = useState({ 
+    quality: 0.85, 
+    format: 'image/jpeg' as ImageProcessOutputFormat 
+  })
+  
+  // 预览状态
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const previewRevokeRef = useRef<string | null>(null)
-  const [sidebarTab, setSidebarTab] = useState<'crop' | 'resize'>('crop')
+  
+  // 当前模式
+  const [mode, setMode] = useState<'crop' | 'resize'>('crop')
 
   const revokePreview = useCallback(() => {
     if (previewRevokeRef.current) {
@@ -91,19 +101,18 @@ export function ImageEditModal({ isDark }: Props) {
   const syncReadout = (cropper: Cropper) => {
     const sel = cropper.getCropperSelection()
     if (!sel) return
-    setCropReadout({ x: sel.x, y: sel.y, w: sel.width, h: sel.height })
+    setCropParams({ x: sel.x, y: sel.y, width: sel.width, height: sel.height })
   }
 
   useEffect(() => {
     if (!open) return
-    setResizeW(0)
-    setResizeH(0)
-    setResizeLockRatio(false)
-    setOutputQuality(0.85)
-    setOutputFormat('image/jpeg')
+    // 重置状态
+    setCropParams({ x: 0, y: 0, width: 0, height: 0 })
+    setResizeParams({ width: 0, height: 0, lockRatio: false })
+    setOutputParams({ quality: 0.85, format: 'image/jpeg' })
     setErr(null)
     revokePreview()
-    setSidebarTab('crop')
+    setMode('crop')
   }, [open, nodeId, sourceUrl, revokePreview])
 
   useEffect(() => {
@@ -152,7 +161,9 @@ export function ImageEditModal({ isDark }: Props) {
               syncReadout(cropper)
             })
           })
-          .catch(() => {})
+          .catch((error) => {
+            if (!cancelled) setErr(`Failed to load image: ${error instanceof Error ? error.message : 'Unknown error'}`)
+          })
 
         const sel = cropper.getCropperSelection()
         const onSelChange = () => syncReadout(cropper)
@@ -183,7 +194,7 @@ export function ImageEditModal({ isDark }: Props) {
     }
   }, [open, sourceUrl, nodeId])
 
-  /** Crop tab: show selection + shade mask. Resize tab: hide both for a clean preview of the full image. */
+  /** Crop mode: show selection + shade mask. Resize mode: show full image without crop selection. */
   useEffect(() => {
     if (!open || naturalW == null) return
     const cropper = cropperRef.current
@@ -191,7 +202,8 @@ export function ImageEditModal({ isDark }: Props) {
     const sel = cropper?.getCropperSelection() ?? null
     if (!canvasEl || !sel) return
 
-    if (sidebarTab === 'crop') {
+    if (mode === 'crop') {
+      // 显示裁剪框和遮罩
       let shade = canvasEl.querySelector('cropper-shade')
       if (!shade) {
         shade = document.createElement('cropper-shade')
@@ -208,49 +220,109 @@ export function ImageEditModal({ isDark }: Props) {
         })
       }
       sel.hidden = false
+      // 显示网格
+      const grid = canvasEl.querySelector('cropper-grid')
+      if (grid) {
+        ;(grid as HTMLElement).style.display = 'block'
+      }
+      // 启用裁剪器交互
+      ;(canvasEl as HTMLElement).style.pointerEvents = 'auto'
     } else {
+      // 隐藏裁剪框、遮罩和网格，显示完整图片
       canvasEl.querySelector('cropper-shade')?.remove()
       sel.hidden = true
+      // 隐藏网格
+      const grid = canvasEl.querySelector('cropper-grid')
+      if (grid) {
+        ;(grid as HTMLElement).style.display = 'none'
+      }
+      // 禁用裁剪器交互，只显示图片
+      ;(canvasEl as HTMLElement).style.pointerEvents = 'none'
+      // 确保选择区域覆盖整个图片
+      if (cropper) selectionCoverFullImage(cropper)
     }
-  }, [open, sidebarTab, naturalW])
+  }, [open, mode, naturalW])
+
+  // 直接处理原图片的调整大小功能
+  const resizeImage = async (url: string, width: number, height: number, format: ImageProcessOutputFormat, quality: number) => {
+    return new Promise<Blob>((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('Canvas context not available'))
+            return
+          }
+          
+          // 计算新的尺寸
+          let newWidth = width
+          let newHeight = height
+          
+          if (width === 0 && height === 0) {
+            // 使用原始尺寸
+            newWidth = img.naturalWidth
+            newHeight = img.naturalHeight
+          } else if (width === 0) {
+            // 按高度比例计算宽度
+            newWidth = Math.round((img.naturalWidth / img.naturalHeight) * height)
+          } else if (height === 0) {
+            // 按宽度比例计算高度
+            newHeight = Math.round((img.naturalHeight / img.naturalWidth) * width)
+          }
+          
+          canvas.width = newWidth
+          canvas.height = newHeight
+          ctx.drawImage(img, 0, 0, newWidth, newHeight)
+          
+          canvasToBlob(canvas, format, quality)
+            .then(blob => {
+              if (blob) {
+                resolve(blob)
+              } else {
+                reject(new Error('Failed to create blob'))
+              }
+            })
+            .catch(reject)
+        } catch (error) {
+          reject(error)
+        }
+      }
+      img.onerror = () => reject(new Error('Failed to load image'))
+      img.src = url
+    })
+  }
 
   useEffect(() => {
-    if (!open || naturalW == null || sidebarTab !== 'resize') {
-      revokePreview()
-      return
-    }
-    const cropper = cropperRef.current
-    const sel = cropper?.getCropperSelection()
-    if (!sel || cropReadout.w <= 0 || cropReadout.h <= 0) {
+    if (!open || naturalW == null || mode !== 'resize') {
       revokePreview()
       return
     }
 
-    const rw = resizeW > 0 ? resizeW : 0
-    const rh = resizeH > 0 ? resizeH : 0
-    let toOpts: { width?: number; height?: number } = {}
-    if (rw > 0 && rh > 0) toOpts = { width: rw, height: rh }
-    else if (rw > 0) toOpts = { width: rw }
-    else if (rh > 0) toOpts = { height: rh }
+    const rw = resizeParams.width > 0 ? resizeParams.width : 0
+    const rh = resizeParams.height > 0 ? resizeParams.height : 0
 
     let stale = false
     const id = window.setTimeout(() => {
       void (async () => {
         try {
-          const canvas =
-            Object.keys(toOpts).length > 0 ? await sel.$toCanvas(toOpts) : await sel.$toCanvas()
-          if (stale) return
-          const blob = await canvasToBlob(canvas, outputFormat, outputQuality)
+          if (!sourceUrl) return
+          const blob = await resizeImage(sourceUrl, rw, rh, outputParams.format, outputParams.quality)
           if (stale) return
           const url = URL.createObjectURL(blob)
           if (previewRevokeRef.current) URL.revokeObjectURL(previewRevokeRef.current)
           previewRevokeRef.current = url
           setPreviewUrl(url)
-        } catch {
-          if (!stale) revokePreview()
+        } catch (error) {
+          if (!stale) {
+            revokePreview()
+            setErr(`Preview generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+          }
         }
       })()
-    }, 180)
+    }, 300) // 增加防抖时间，减少频繁计算
 
     return () => {
       stale = true
@@ -259,16 +331,13 @@ export function ImageEditModal({ isDark }: Props) {
   }, [
     open,
     naturalW,
-    resizeW,
-    resizeH,
-    outputFormat,
-    outputQuality,
-    cropReadout.x,
-    cropReadout.y,
-    cropReadout.w,
-    cropReadout.h,
-    sidebarTab,
+    resizeParams.width,
+    resizeParams.height,
+    outputParams.format,
+    outputParams.quality,
+    mode,
     revokePreview,
+    sourceUrl
   ])
 
   useEffect(
@@ -302,30 +371,52 @@ export function ImageEditModal({ isDark }: Props) {
   }
 
   const onApply = async () => {
-    if (!nodeId) return
-    const sel = cropperRef.current?.getCropperSelection()
-    if (!sel) {
-      setErr('Cropper not ready')
+    if (!nodeId) {
+      setErr('No node selected')
       return
     }
     setBusy(true)
     setErr(null)
     try {
-      const rw = resizeW > 0 ? resizeW : 0
-      const rh = resizeH > 0 ? resizeH : 0
-      let toOpts: { width?: number; height?: number } = {}
-      if (rw > 0 && rh > 0) toOpts = { width: rw, height: rh }
-      else if (rw > 0) toOpts = { width: rw }
-      else if (rh > 0) toOpts = { height: rh }
+      let blob: Blob
+      
+      if (mode === 'resize') {
+        // 直接对原图片进行调整大小
+        if (!sourceUrl) {
+          setErr('No image source')
+          return
+        }
+        const rw = resizeParams.width > 0 ? resizeParams.width : 0
+        const rh = resizeParams.height > 0 ? resizeParams.height : 0
+        blob = await resizeImage(sourceUrl, rw, rh, outputParams.format, outputParams.quality)
+      } else {
+        // 裁剪模式
+        const sel = cropperRef.current?.getCropperSelection()
+        if (!sel) {
+          setErr('Editor not ready')
+          return
+        }
+        if (cropParams.width <= 0 || cropParams.height <= 0) {
+          setErr('Invalid crop area')
+          return
+        }
+        
+        const rw = resizeParams.width > 0 ? resizeParams.width : 0
+        const rh = resizeParams.height > 0 ? resizeParams.height : 0
+        let toOpts: { width?: number; height?: number } = {}
+        if (rw > 0 && rh > 0) toOpts = { width: rw, height: rh }
+        else if (rw > 0) toOpts = { width: rw }
+        else if (rh > 0) toOpts = { height: rh }
 
-      const canvas =
-        Object.keys(toOpts).length > 0 ? await sel.$toCanvas(toOpts) : await sel.$toCanvas()
-      const blob = await canvasToBlob(canvas, outputFormat, outputQuality)
+        const canvas =
+          Object.keys(toOpts).length > 0 ? await sel.$toCanvas(toOpts) : await sel.$toCanvas()
+        blob = await canvasToBlob(canvas, outputParams.format, outputParams.quality)
+      }
 
       const n = useCanvasStore.getState().nodes.find((x) => x.id === nodeId)
       const d = n?.data
       if (!d) {
-        close()
+        setErr('Node not found')
         return
       }
       revokeIfBlob(d.content)
@@ -348,17 +439,31 @@ export function ImageEditModal({ isDark }: Props) {
 
   if (!open || !sourceUrl) return null
 
-  const cw = cropReadout.w
-  const ch = cropReadout.h
-  const outW = resizeW > 0 ? resizeW : cw
-  const outH = resizeH > 0 ? resizeH : ch
+  const cw = cropParams.width
+  const ch = cropParams.height
+  let outW, outH
+  if (mode === 'resize') {
+    // 调整大小模式：使用指定的尺寸或原始尺寸
+    outW = resizeParams.width > 0 ? resizeParams.width : naturalW || 0
+    outH = resizeParams.height > 0 ? resizeParams.height : naturalH || 0
+    // 如果只指定了一个维度，按比例计算另一个维度
+    if (resizeParams.width > 0 && resizeParams.height === 0 && naturalW && naturalH) {
+      outH = Math.round((naturalH / naturalW) * outW)
+    } else if (resizeParams.height > 0 && resizeParams.width === 0 && naturalW && naturalH) {
+      outW = Math.round((naturalW / naturalH) * outH)
+    }
+  } else {
+    // 裁剪模式：使用裁剪后的尺寸
+    outW = resizeParams.width > 0 ? resizeParams.width : cw
+    outH = resizeParams.height > 0 ? resizeParams.height : ch
+  }
 
   const panelClass = isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-zinc-200 text-zinc-900'
   const subBtn =
     isDark ? 'bg-zinc-700 text-zinc-200 hover:bg-zinc-600' : 'bg-zinc-200 text-zinc-800 hover:bg-zinc-300'
   const btnPrimary = `px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 justify-center`
-  const tabActive = 'bg-violet-600 text-white hover:bg-violet-700'
-  const tabIdle = subBtn
+  const modeActive = 'bg-violet-600 text-white hover:bg-violet-700'
+  const modeIdle = subBtn
 
   return (
     <>
@@ -386,15 +491,41 @@ export function ImageEditModal({ isDark }: Props) {
               (double-click on canvas · drag to pan · scroll to zoom)
             </span>
           </h2>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => close()}
-            className={`p-1 rounded ${isDark ? 'hover:bg-zinc-700' : 'hover:bg-zinc-200'}`}
-            aria-label="Close"
-          >
-            <X className="size-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <div
+              className={`flex rounded overflow-hidden border p-0.5 gap-0.5 ${
+                isDark ? 'border-zinc-600' : 'border-zinc-300'
+              }`}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === 'crop'}
+                onClick={() => setMode('crop')}
+                className={`flex-1 py-1 rounded text-[11px] font-medium ${mode === 'crop' ? modeActive : modeIdle}`}
+              >
+                Crop
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === 'resize'}
+                onClick={() => setMode('resize')}
+                className={`flex-1 py-1 rounded text-[11px] font-medium ${mode === 'resize' ? modeActive : modeIdle}`}
+              >
+                Resize
+              </button>
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => close()}
+              className={`p-1 rounded ${isDark ? 'hover:bg-zinc-700' : 'hover:bg-zinc-200'}`}
+              aria-label="Close"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 flex min-h-0 gap-2 p-2">
@@ -408,32 +539,7 @@ export function ImageEditModal({ isDark }: Props) {
           </div>
 
           <div className="w-56 shrink-0 flex flex-col gap-2 text-xs overflow-y-auto">
-            <div
-              className={`flex rounded overflow-hidden border p-0.5 gap-0.5 ${
-                isDark ? 'border-zinc-600' : 'border-zinc-300'
-              }`}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sidebarTab === 'crop'}
-                onClick={() => setSidebarTab('crop')}
-                className={`flex-1 py-1 rounded text-[11px] font-medium ${sidebarTab === 'crop' ? tabActive : tabIdle}`}
-              >
-                Crop
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sidebarTab === 'resize'}
-                onClick={() => setSidebarTab('resize')}
-                className={`flex-1 py-1 rounded text-[11px] font-medium ${sidebarTab === 'resize' ? tabActive : tabIdle}`}
-              >
-                Resize
-              </button>
-            </div>
-
-            {sidebarTab === 'crop' && (
+            {mode === 'crop' && (
               <div className="flex flex-col gap-2 min-h-0">
                 <div className="flex flex-wrap gap-1">
                   {(['free', '1:1', '4:3', '16:9', '9:16'] as const).map((p) => (
@@ -458,7 +564,7 @@ export function ImageEditModal({ isDark }: Props) {
                   }`}
                 >
                   <div>
-                    Crop (canvas): {Math.round(cropReadout.x)}, {Math.round(cropReadout.y)}
+                    Crop (canvas): {Math.round(cropParams.x)}, {Math.round(cropParams.y)}
                   </div>
                   <div>
                     Size: {Math.round(cw)}×{Math.round(ch)}
@@ -467,45 +573,51 @@ export function ImageEditModal({ isDark }: Props) {
               </div>
             )}
 
-            {sidebarTab === 'resize' && (
+            {mode === 'resize' && (
               <div className="flex flex-col gap-2 min-h-0">
                 <label className="block space-y-0.5">
-                  <span className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>Width (0 = keep crop size)</span>
+                  <span className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>Width (0 = keep original size)</span>
                   <input
                     type="number"
                     min={0}
                     className={`w-full px-2 py-1 rounded border text-xs ${isDark ? 'bg-zinc-800 border-zinc-600' : 'bg-white border-zinc-300'}`}
-                    value={resizeW || ''}
+                    value={resizeParams.width || ''}
                     onChange={(e) => {
                       const v = Math.max(0, Math.round(parseFloat(e.target.value) || 0))
-                      setResizeW(v)
-                      if (resizeLockRatio && v > 0 && cw > 0 && ch > 0) {
-                        setResizeH(Math.max(1, Math.round((ch / cw) * v)))
-                      }
+                      setResizeParams(prev => {
+                        const newParams = { ...prev, width: v }
+                        if (prev.lockRatio && v > 0 && naturalW && naturalH) {
+                          newParams.height = Math.max(1, Math.round((naturalH / naturalW) * v))
+                        }
+                        return newParams
+                      })
                     }}
                   />
                 </label>
                 <label className="block space-y-0.5">
-                  <span className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>Height (0 = keep crop size)</span>
+                  <span className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>Height (0 = keep original size)</span>
                   <input
                     type="number"
                     min={0}
                     className={`w-full px-2 py-1 rounded border text-xs ${isDark ? 'bg-zinc-800 border-zinc-600' : 'bg-white border-zinc-300'}`}
-                    value={resizeH || ''}
+                    value={resizeParams.height || ''}
                     onChange={(e) => {
                       const v = Math.max(0, Math.round(parseFloat(e.target.value) || 0))
-                      setResizeH(v)
-                      if (resizeLockRatio && v > 0 && cw > 0 && ch > 0) {
-                        setResizeW(Math.max(1, Math.round((cw / ch) * v)))
-                      }
+                      setResizeParams(prev => {
+                        const newParams = { ...prev, height: v }
+                        if (prev.lockRatio && v > 0 && naturalW && naturalH) {
+                          newParams.width = Math.max(1, Math.round((naturalW / naturalH) * v))
+                        }
+                        return newParams
+                      })
                     }}
                   />
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer text-[11px]">
                   <input
                     type="checkbox"
-                    checked={resizeLockRatio}
-                    onChange={(e) => setResizeLockRatio(e.target.checked)}
+                    checked={resizeParams.lockRatio}
+                    onChange={(e) => setResizeParams(prev => ({ ...prev, lockRatio: e.target.checked }))}
                     className="rounded"
                   />
                   Lock ratio
@@ -522,7 +634,7 @@ export function ImageEditModal({ isDark }: Props) {
                       <img src={previewUrl} alt="" className="max-w-full max-h-36 object-contain" />
                     ) : (
                       <span className="text-[10px] opacity-50 px-2 py-6 text-center">
-                        Change size or switch to Crop…
+                        Adjust size to see preview
                       </span>
                     )}
                   </div>
@@ -532,23 +644,23 @@ export function ImageEditModal({ isDark }: Props) {
 
             <label className="block space-y-0.5">
               <span className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>
-                Quality ({outputQuality.toFixed(2)})
+                Quality ({outputParams.quality.toFixed(2)})
               </span>
               <input
                 type="range"
                 min={0.1}
                 max={1}
                 step={0.05}
-                value={outputQuality}
-                onChange={(e) => setOutputQuality(Number(e.target.value))}
+                value={outputParams.quality}
+                onChange={(e) => setOutputParams(prev => ({ ...prev, quality: Number(e.target.value) }))}
                 className="w-full"
               />
             </label>
             <label className="block space-y-0.5">
               <span className={isDark ? 'text-zinc-400' : 'text-zinc-600'}>Format</span>
               <select
-                value={outputFormat}
-                onChange={(e) => setOutputFormat(e.target.value as ImageProcessOutputFormat)}
+                value={outputParams.format}
+                onChange={(e) => setOutputParams(prev => ({ ...prev, format: e.target.value as ImageProcessOutputFormat }))}
                 className={`w-full px-2 py-1 rounded border text-xs ${isDark ? 'bg-zinc-800 border-zinc-600' : 'bg-white border-zinc-300'}`}
               >
                 <option value="image/jpeg">JPEG</option>
@@ -562,9 +674,17 @@ export function ImageEditModal({ isDark }: Props) {
                 isDark ? 'border-zinc-700 text-zinc-400' : 'border-zinc-200 text-zinc-600'
               }`}
             >
-              {naturalW != null && naturalH != null ? `${naturalW}×${naturalH}` : '—'} → crop{' '}
-              {cw > 0 && ch > 0 ? `${Math.round(cw)}×${Math.round(ch)}` : '—'} → out{' '}
-              {outW > 0 && outH > 0 ? `${Math.round(outW)}×${Math.round(outH)}` : '—'}
+              {mode === 'crop' ? (
+                <>{
+                  naturalW != null && naturalH != null ? `${naturalW}×${naturalH}` : '—'} → crop{' '}
+                  {cw > 0 && ch > 0 ? `${Math.round(cw)}×${Math.round(ch)}` : '—'} → out{' '}
+                  {outW > 0 && outH > 0 ? `${Math.round(outW)}×${Math.round(outH)}` : '—'}
+                </>
+              ) : (
+                <>{naturalW != null && naturalH != null ? `${naturalW}×${naturalH}` : '—'} → out{' '}
+                  {outW > 0 && outH > 0 ? `${Math.round(outW)}×${Math.round(outH)}` : '—'}
+                </>
+              )}
             </div>
           </div>
         </div>

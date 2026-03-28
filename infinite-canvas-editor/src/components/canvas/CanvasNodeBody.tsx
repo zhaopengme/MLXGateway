@@ -1,6 +1,7 @@
 import { Loader2, MessageSquare, Mic, Send, SendToBack, Sparkles, Volume2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import * as api from '../../api/gateway'
+import { EditImageModal } from '../EditImageModal'
 import { useCanvasStore, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../../stores/canvasStore'
 import { useImageEditStore } from '../../stores/imageEditStore'
 import { useProjectStore } from '../../stores/projectStore'
@@ -113,14 +114,27 @@ export function CanvasNodeBody({ node, isDark }: Props) {
 
 const btnPrimary = `px-2 py-1 rounded text-[10px] font-medium flex items-center gap-1 justify-center`
 
+function isImageUrl(url: string | undefined): boolean {
+  if (!url) return false
+  if (url.startsWith('data:image/')) return true
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const base = url.split('?')[0].toLowerCase()
+    if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(base)) return true
+  }
+  return false
+}
+
 function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
   const updateNode = useCanvasStore((s) => s.updateNode)
+  const addNode = useCanvasStore((s) => s.addNode)
   const openImageEditor = useImageEditStore((s) => s.openEditor)
   const addHistoryItem = useProjectStore((s) => s.addHistoryItem)
   const addClip = useTimelineStore((s) => s.addClip)
   const incoming = getOrderedIncomingNodes(node.id)
   const imageRefs = incoming.filter(isImageLikeNode)
-  const canEdit = node.data.useImageEdit && imageRefs.length > 0
+  const hasImageSource = imageRefs.length > 0 || isImageUrl(node.data.content)
+
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
 
   const onGenerate = async () => {
     const prompt = getPromptFromIncoming(incoming, node.data.prompt)
@@ -130,30 +144,12 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
     }
     updateNode(node.id, { data: { ...node.data, status: 'generating', error: undefined } })
     try {
-      let urls: { url: string }[]
-      if (canEdit) {
-        const files: File[] = []
-        let i = 0
-        for (const src of imageRefs) {
-          const u = getImageUrlFromNode(src)
-          if (!u) continue
-          files.push(await urlToImageFile(u, `ref_${i++}.png`))
-        }
-        if (!files.length) throw new Error('No usable image URLs for edit')
-        urls = await api.editImage({
-          model: node.data.model ?? 'flux2-klein-9b-edit',
-          prompt,
-          images: files,
-          response_format: 'url',
-        })
-      } else {
-        urls = await api.generateImage({
-          model: node.data.model ?? DEFAULT_IMAGE_MODEL,
-          prompt,
-          size: node.data.imageSize ?? '1024x1024',
-          n: 1,
-        })
-      }
+      const urls = await api.generateImage({
+        model: node.data.model ?? DEFAULT_IMAGE_MODEL,
+        prompt,
+        size: node.data.imageSize ?? '1024x1024',
+        n: 1,
+      })
       const first = urls[0]?.url
       if (!first) throw new Error('No image URL in response')
       updateNode(node.id, {
@@ -172,22 +168,107 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
     }
   }
 
+  const handleEditConfirm = async (count: number, editPrompts: string[]) => {
+    // 检查是否所有提示词都为空
+    const hasAnyPrompt = editPrompts.some(p => p.trim()) || getPromptFromIncoming(incoming, node.data.prompt).trim()
+    if (!hasAnyPrompt) {
+      updateNode(node.id, { data: { ...node.data, status: 'error', error: 'Prompt is empty' } })
+      return
+    }
+    updateNode(node.id, { data: { ...node.data, status: 'generating', error: undefined } })
+    try {
+      const files: File[] = []
+      let i = 0
+      // 优先使用输入节点的图片
+      for (const src of imageRefs) {
+        const u = getImageUrlFromNode(src)
+        if (!u) continue
+        files.push(await urlToImageFile(u, `ref_${i++}.png`))
+      }
+      // 如果没有输入节点，使用当前节点的图片
+      if (!files.length && isImageUrl(node.data.content)) {
+        files.push(await urlToImageFile(node.data.content!, `ref_${i++}.png`))
+      }
+      if (!files.length) throw new Error('No usable image URLs for edit')
+
+      const results: string[] = []
+      const defaultPrompt = getPromptFromIncoming(incoming, node.data.prompt)
+      for (let i = 0; i < count; i++) {
+        // 使用对应索引的提示词，如果没有则使用默认提示词
+        const prompt = editPrompts[i]?.trim() || defaultPrompt
+        if (!prompt) continue
+        const urls = await api.editImage({
+          model: node.data.model ?? 'flux2-klein-9b-edit',
+          prompt,
+          images: files,
+          response_format: 'url',
+        })
+        const url = urls[0]?.url
+        if (url) {
+          results.push(url)
+          addHistoryItem({ type: 'image', url, prompt, label: `${node.data.title || 'image'}_${i + 1}` })
+        }
+      }
+
+      if (results.length === 0) throw new Error('No image URLs in response')
+
+      results.forEach((url, index) => {
+        addNode({
+          type: 'media',
+          x: node.x + node.width + 50,
+          y: node.y + index * 220,
+          width: 200,
+          height: 200,
+          data: {
+            content: url,
+            previewType: 'image',
+            title: `${node.data.title || 'image'}_${index + 1}`,
+          },
+          settings: {},
+        })
+      })
+
+      updateNode(node.id, {
+        data: {
+          ...node.data,
+          status: 'done',
+          error: undefined,
+        },
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Edit failed'
+      updateNode(node.id, { data: { ...node.data, status: 'error', error: msg } })
+    }
+  }
+
   const url = node.data.content
   const loading = node.data.status === 'generating'
   const err = node.data.error
 
   return (
-    <div className={`flex flex-col h-full min-h-0 ${isDark ? 'bg-zinc-900' : 'bg-white'}`}>
-      <div className="shrink-0 flex flex-wrap gap-1 p-2 border-b border-zinc-700/50">
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void onGenerate()}
-          className={`${btnPrimary} ${isDark ? 'bg-violet-600 text-white' : 'bg-violet-600 text-white'}`}
-        >
-          {loading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
-          {canEdit ? 'Edit' : 'Generate'}
-        </button>
+    <>
+      <div className={`flex flex-col h-full min-h-0 ${isDark ? 'bg-zinc-900' : 'bg-white'}`}>
+        <div className="shrink-0 flex flex-wrap gap-1 p-2 border-b border-zinc-700/50">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void onGenerate()}
+            className={`${btnPrimary} ${isDark ? 'bg-violet-600 text-white' : 'bg-violet-600 text-white'}`}
+          >
+            {loading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+            Generate
+          </button>
+          {hasImageSource && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => setIsEditModalOpen(true)}
+              className={`${btnPrimary} ${isDark ? 'bg-amber-600 text-white' : 'bg-amber-600 text-white'}`}
+            >
+              {loading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+              Edit
+            </button>
+          )}
         <button
           type="button"
           disabled={!url || loading}
@@ -211,7 +292,6 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
       {incoming.length > 0 && (
         <div className={`text-[9px] px-2 py-1 ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>
           {imageRefs.length} image input(s) from graph
-          {node.data.useImageEdit ? ' — using /v1/images/edits' : ''}
         </div>
       )}
       {err && <div className="text-[10px] text-red-400 px-2 py-1 break-words">{err}</div>}
@@ -242,7 +322,16 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
           {loading ? 'Generating…' : 'Run Generate or set URL in properties'}
         </div>
       )}
-    </div>
+      </div>
+      <EditImageModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onConfirm={handleEditConfirm}
+        defaultCount={3}
+        defaultPrompt={node.data.prompt || ''}
+        isDark={isDark}
+      />
+    </>
   )
 }
 
@@ -541,7 +630,7 @@ function TtsNodeBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
       const blob = await api.textToSpeech({
         model: node.data.model ?? DEFAULT_TTS_MODEL,
         input,
-        voice: node.data.voice ?? 'af_sky',
+        voice: node.data.voice ?? 'liuyifei',
         response_format: node.data.ttsFormat ?? 'wav',
       })
       const url = URL.createObjectURL(blob)
