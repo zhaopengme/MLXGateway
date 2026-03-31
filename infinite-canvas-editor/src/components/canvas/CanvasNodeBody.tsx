@@ -1,9 +1,9 @@
-import { Loader2, MessageSquare, Mic, Send, SendToBack, Sparkles, Volume2 } from 'lucide-react'
+import { Image, Loader2, MessageSquare, Mic, Send, SendToBack, Sparkles, Volume2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import * as api from '../../api/gateway'
 import { EditImageModal } from '../EditImageModal'
-import { useCanvasStore, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../../stores/canvasStore'
+import { useCanvasStore, DEFAULT_IMAGE_MODEL, DEFAULT_IMAGE_EDIT_MODEL, DEFAULT_VIDEO_MODEL } from '../../stores/canvasStore'
 import { useImageEditStore } from '../../stores/imageEditStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useTimelineStore } from '../../stores/timelineStore'
@@ -19,13 +19,21 @@ import { DEFAULT_CHAT_MODEL, DEFAULT_STT_MODEL, DEFAULT_TTS_MODEL } from '../../
 import { getAudioDurationSec, getVideoDurationSec } from '../../utils/mediaDuration'
 import { AUDIO_TRACK_ID } from '../../types/timeline'
 
+import { getGatewayBaseUrl } from '../../stores/gatewayStore'
+
 type Props = {
   node: NodeType
   isDark: boolean
 }
 
+function proxiedUrl(url: string): string {
+  const base = getGatewayBaseUrl()
+  if (url.startsWith(base + '/')) return '/gateway/' + url.slice(base.length + 1)
+  return url
+}
+
 async function urlToImageFile(url: string, filename: string): Promise<File> {
-  const res = await fetch(url)
+  const res = await fetch(proxiedUrl(url))
   const blob = await res.blob()
   return new File([blob], filename, { type: blob.type || 'image/png' })
 }
@@ -87,6 +95,9 @@ export function CanvasNodeBody({ node, isDark }: Props) {
 
   if (node.type === 'chat') {
     return <ChatNodeBody node={node} isDark={isDark} />
+  }
+  if (node.type === 'gen-image-advanced') {
+    return <GenImageAdvancedBody node={node} isDark={isDark} />
   }
   if (node.type === 'tts') {
     return <TtsNodeBody node={node} isDark={isDark} />
@@ -348,6 +359,27 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
   const updateNode = useCanvasStore((s) => s.updateNode)
   const addHistoryItem = useProjectStore((s) => s.addHistoryItem)
   const addClip = useTimelineStore((s) => s.addClip)
+  const connections = useCanvasStore((s) => s.connections)
+  const allNodes = useCanvasStore((s) => s.nodes)
+  const nodesMap = new Map(allNodes.map((n) => [n.id, n]))
+
+  // Resolve frame images in port order (ref-0 = first frame, ref-1 = last frame)
+  const incomingConns = connections.filter((c) => c.to === node.id)
+  const frameRefs = [0, 1].map((idx) => {
+    const conn = incomingConns.find((c) => c.toPort === `ref-${idx}`)
+    if (!conn) return null
+    const src = nodesMap.get(conn.from)
+    if (!src || !isImageLikeNode(src)) return null
+    return { idx, node: src, url: getImageUrlFromNode(src) }
+  }).filter(Boolean) as { idx: number; node: NodeType; url: string | undefined }[]
+
+  const firstFrame = frameRefs.find((r) => r.idx === 0)
+  const lastFrame = frameRefs.find((r) => r.idx === 1)
+
+  // Mode label
+  const mode = firstFrame && lastFrame ? 'I2V Dual-Frame' : firstFrame ? 'I2V First Frame' : 'T2V'
+
+  // Also gather all incoming for prompt / TTS resolution
   const incoming = getOrderedIncomingNodes(node.id)
 
   const onGenerate = async () => {
@@ -360,7 +392,6 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
     updateNode(node.id, { data: { ...node.data, status: 'generating', error: undefined } })
     const loadingToast = toast.loading('Generating video…')
     try {
-      const imgs = incoming.filter(isImageLikeNode).map(getImageUrlFromNode).filter(Boolean) as string[]
       const ttsNode = incoming.find((n) => n.type === 'tts' && n.data.audioBlobUrl)
       let audio_file: string | undefined
       if (ttsNode?.data.audioBlobUrl) {
@@ -382,8 +413,8 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
       }
       if (node.data.textEncoderRepo != null && node.data.textEncoderRepo !== '')
         body.text_encoder_repo = node.data.textEncoderRepo
-      if (imgs[0]) body.image_url = imgs[0]
-      if (imgs[1]) body.end_image_url = imgs[1]
+      if (firstFrame?.url) body.image_url = firstFrame.url
+      if (lastFrame?.url) body.end_image_url = lastFrame.url
       if (audio_file) body.audio_file = audio_file
 
       const { url } = await api.generateVideo(body)
@@ -446,14 +477,31 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
           <SendToBack className="size-3" />
           Timeline
         </button>
+        <span className={`flex items-center text-[9px] font-medium px-1.5 py-0.5 rounded ${
+          mode === 'T2V'
+            ? isDark ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-200 text-zinc-600'
+            : isDark ? 'bg-sky-900/60 text-sky-300' : 'bg-sky-100 text-sky-700'
+        }`}>
+          {mode}
+        </span>
       </div>
-      {incoming.length > 0 && (
-        <div className={`text-[9px] px-2 py-1 ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>
-          Inputs:{' '}
-          {incoming
-            .filter(isImageLikeNode)
-            .length.toString()} image(s),{' '}
-          {incoming.some((n) => n.type === 'tts') ? 'TTS' : 'no TTS'}
+      {frameRefs.length > 0 && (
+        <div className={`text-[9px] px-2 py-1 flex items-center gap-2 border-b border-zinc-700/50 ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
+          {firstFrame && (
+            <div className="flex items-center gap-0.5 shrink-0">
+              <span className="text-[8px] opacity-60">1st</span>
+              {firstFrame.url && <img src={firstFrame.url} alt="" className="size-5 rounded-sm object-cover" />}
+            </div>
+          )}
+          {lastFrame && (
+            <div className="flex items-center gap-0.5 shrink-0">
+              <span className="text-[8px] opacity-60">last</span>
+              {lastFrame.url && <img src={lastFrame.url} alt="" className="size-5 rounded-sm object-cover" />}
+            </div>
+          )}
+          {incoming.some((n) => n.type === 'tts') && (
+            <span className="text-[8px] opacity-60">+ TTS</span>
+          )}
         </div>
       )}
       {err && <div className="text-[10px] text-red-400 px-2 py-1 break-words">{err}</div>}
@@ -478,7 +526,7 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
         </div>
       ) : (
         <div className={`flex-1 flex items-center justify-center text-xs p-4 ${isDark ? 'text-zinc-500' : 'text-zinc-400'}`}>
-          {loading ? 'Generating (GPU may take minutes)…' : 'Configure prompt & params, then Generate'}
+          {loading ? 'Generating (GPU may take minutes)…' : 'Connect frames via ports or set prompt, then Generate'}
         </div>
       )}
     </div>
@@ -779,6 +827,179 @@ function SttNodeBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
       >
         {node.data.transcribedText || (busy ? 'Transcribing…' : '—')}
       </div>
+    </div>
+  )
+}
+
+function GenImageAdvancedBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
+  const updateNode = useCanvasStore((s) => s.updateNode)
+  const addHistoryItem = useProjectStore((s) => s.addHistoryItem)
+  const addClip = useTimelineStore((s) => s.addClip)
+  const openImageEditor = useImageEditStore((s) => s.openEditor)
+  const connections = useCanvasStore((s) => s.connections)
+  const allNodes = useCanvasStore((s) => s.nodes)
+  const nodesMap = new Map(allNodes.map((n) => [n.id, n]))
+
+  // Resolve reference images in port order (ref-0, ref-1)
+  const incomingConns = connections.filter((c) => c.to === node.id)
+  const refImages = [0, 1].map((idx) => {
+    const conn = incomingConns.find((c) => c.toPort === `ref-${idx}`)
+    if (!conn) return null
+    const src = nodesMap.get(conn.from)
+    if (!src || !isImageLikeNode(src)) return null
+    return { idx, node: src, url: getImageUrlFromNode(src) }
+  }).filter(Boolean) as { idx: number; node: NodeType; url: string | undefined }[]
+
+  // Also gather all incoming for prompt resolution
+  const incoming = getOrderedIncomingNodes(node.id)
+
+  const onGenerate = async () => {
+    const prompt = getPromptFromIncoming(incoming, node.data.prompt)
+    if (!prompt.trim()) {
+      updateNode(node.id, { data: { ...node.data, status: 'error', error: 'Prompt is empty' } })
+      toast.error('Prompt is empty')
+      return
+    }
+    updateNode(node.id, { data: { ...node.data, status: 'generating', error: undefined } })
+    const loadingToast = toast.loading('Generating image…')
+    try {
+      if (refImages.length > 0) {
+        const files: File[] = []
+        for (const ref of refImages) {
+          if (ref.url) files.push(await urlToImageFile(ref.url, `ref_${ref.idx}.png`))
+        }
+        if (files.length === 0) throw new Error('No usable reference images')
+        const urls = await api.editImage({
+          model: node.data.model ?? DEFAULT_IMAGE_EDIT_MODEL,
+          prompt,
+          images: files,
+          response_format: 'url',
+        })
+        const first = urls[0]?.url
+        if (!first) throw new Error('No image URL in response')
+        updateNode(node.id, {
+          data: { ...node.data, status: 'done', content: first, previewType: 'image', error: undefined },
+        })
+        addHistoryItem({ type: 'image', url: first, prompt, label: node.data.title })
+        toast.dismiss(loadingToast)
+        toast.success('Image generated')
+      } else {
+        const urls = await api.generateImage({
+          model: node.data.model ?? DEFAULT_IMAGE_MODEL,
+          prompt,
+          size: node.data.imageSize ?? '1024x1024',
+          n: 1,
+        })
+        const first = urls[0]?.url
+        if (!first) throw new Error('No image URL in response')
+        updateNode(node.id, {
+          data: { ...node.data, status: 'done', content: first, previewType: 'image', error: undefined },
+        })
+        addHistoryItem({ type: 'image', url: first, prompt, label: node.data.title })
+        toast.dismiss(loadingToast)
+        toast.success('Image generated')
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Generation failed'
+      updateNode(node.id, { data: { ...node.data, status: 'error', error: msg } })
+      toast.dismiss(loadingToast)
+      toast.error(msg)
+    }
+  }
+
+  const url = node.data.content
+  const loading = node.data.status === 'generating'
+  const err = node.data.error
+
+  return (
+    <div className={`flex flex-col h-full min-h-0 ${isDark ? 'bg-zinc-900' : 'bg-white'}`}>
+      <div className="shrink-0 flex flex-wrap gap-1 p-2 border-b border-zinc-700/50">
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void onGenerate()}
+          className={`${btnPrimary} ${isDark ? 'bg-violet-600 text-white' : 'bg-violet-600 text-white'}`}
+        >
+          {loading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+          Generate
+        </button>
+        {url && (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() =>
+              void addClip({
+                mediaType: 'image',
+                src: url,
+                duration: 3,
+                trimStart: 0,
+                trimEnd: 0,
+                label: node.data.title || 'image',
+                sourceNodeId: node.id,
+              })
+            }
+            className={`${btnPrimary} ${isDark ? 'bg-zinc-700 text-zinc-200' : 'bg-zinc-200 text-zinc-800'}`}
+          >
+            <SendToBack className="size-3" />
+            Timeline
+          </button>
+        )}
+      </div>
+      {refImages.length > 0 && (
+        <div className={`text-[9px] px-2 py-1 flex items-center gap-2 border-b border-zinc-700/50 ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
+          <div className="flex items-center gap-1 shrink-0">
+            <Image className="size-3" />
+            <span>{refImages.length} ref{refImages.length > 1 ? 's' : ''}</span>
+          </div>
+          <div className="flex gap-1 overflow-hidden">
+            {refImages.map((ref) => (
+              <div key={ref.idx} className="flex items-center gap-0.5 shrink-0">
+                <span className="text-[8px] opacity-60">ref{ref.idx}</span>
+                {ref.url && (
+                  <img
+                    src={ref.url}
+                    alt=""
+                    className="size-5 rounded-sm object-cover"
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!node.data.prompt?.trim() && refImages.length === 0 && incoming.length === 0 && (
+        <div className={`text-[9px] px-2 py-1 ${isDark ? 'text-zinc-600' : 'text-zinc-400'}`}>
+          Drag output port → input port to connect refs. Use ref0/ref1 in prompt.
+        </div>
+      )}
+      {err && <div className="text-[10px] text-red-400 px-2 py-1 break-words">{err}</div>}
+      {url ? (
+        <div
+          className="flex-1 min-h-0 flex items-center justify-center bg-black/40"
+          draggable
+          title="Drag to timeline · Double-click image to crop / compress"
+          onDragStart={(e) => {
+            e.stopPropagation()
+            e.dataTransfer.setData('application/x-canvas-node', node.id)
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+        >
+          <img
+            src={url}
+            alt=""
+            className="max-w-full max-h-full object-contain cursor-pointer"
+            draggable={false}
+            onDoubleClick={(e) => {
+              e.stopPropagation()
+              openImageEditor(node.id, url)
+            }}
+          />
+        </div>
+      ) : (
+        <div className={`flex-1 flex items-center justify-center text-xs p-4 ${isDark ? 'text-zinc-500' : 'text-zinc-400'}`}>
+          {loading ? 'Generating…' : 'Connect reference nodes or set prompt, then Generate'}
+        </div>
+      )}
     </div>
   )
 }

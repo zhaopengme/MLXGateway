@@ -108,7 +108,7 @@ export function PropertiesPanel({ isDark }: Props) {
     isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200'
   }`
 
-  const isGenKind = (t: string) => t === 'gen-image' || t === 'gen-video'
+  const isGenKind = (t: string) => t === 'gen-image' || t === 'gen-video' || t === 'gen-image-advanced'
   const showPrompt =
     node != null &&
     (node.type.startsWith('gen-') || node.type === 'tts' || node.type === 'prompt')
@@ -632,13 +632,13 @@ export function PropertiesPanel({ isDark }: Props) {
                     }`}
                   />
                 </label>
-                {(node.type === 'media' || node.type === 'gen-image') &&
+                {(node.type === 'media' || node.type === 'gen-image' || node.type === 'gen-image-advanced') &&
                   node.data.previewType !== 'video' && (
                     <p className={`text-[10px] ${isDark ? 'text-zinc-500' : 'text-zinc-600'}`}>
                       Double-click the image on the canvas to crop, resize, and compress.
                     </p>
                   )}
-                {(node.type === 'media' || node.type === 'gen-image') && (
+                {(node.type === 'media' || node.type === 'gen-image' || node.type === 'gen-image-advanced') && (
                   <label className="flex items-center gap-2">
                     <span className={isDark ? 'text-zinc-500' : 'text-zinc-500'}>Preview</span>
                     <select

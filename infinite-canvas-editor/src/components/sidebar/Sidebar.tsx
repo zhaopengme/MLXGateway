@@ -1,4 +1,4 @@
-import { History, ImagePlus, MessageSquare, Mic, Sparkles, Type, Video, Volume2, Wand2 } from 'lucide-react'
+import { History, ImagePlus, Layers, MessageSquare, Mic, Sparkles, Type, Video, Volume2, Wand2 } from 'lucide-react'
 import { useState } from 'react'
 import { useCanvasStore } from '../../stores/canvasStore'
 import { useProjectStore } from '../../stores/projectStore'
@@ -36,6 +36,9 @@ export function Sidebar({ isDark }: Props) {
         </button>
         <button type="button" className={btn} title="Add image gen node" onClick={() => addSquareNode('gen-image')}>
           <Wand2 className="size-5" />
+        </button>
+        <button type="button" className={btn} title="Add advanced image gen (with references)" onClick={() => addSquareNode('gen-image-advanced')}>
+          <Layers className="size-5" />
         </button>
         <button type="button" className={btn} title="Add chat node" onClick={() => addSquareNode('chat')}>
           <MessageSquare className="size-5" />
@@ -115,6 +118,7 @@ export function Sidebar({ isDark }: Props) {
       | 'media'
       | 'gen-video'
       | 'gen-image'
+      | 'gen-image-advanced'
       | 'chat'
       | 'tts'
       | 'stt'
@@ -146,6 +150,24 @@ export function Sidebar({ isDark }: Props) {
         type: 'gen-image',
         data: {
           title: 'Image gen',
+          prompt: '',
+          previewType: 'image',
+          content: '',
+          model: DEFAULT_IMAGE_MODEL,
+          imageSize: '1024x1024',
+          status: 'idle',
+        },
+        settings: {},
+      })
+      return
+    }
+    if (kind === 'gen-image-advanced') {
+      addNode({
+        ...base,
+        height: 280,
+        type: 'gen-image-advanced',
+        data: {
+          title: 'Image gen+',
           prompt: '',
           previewType: 'image',
           content: '',

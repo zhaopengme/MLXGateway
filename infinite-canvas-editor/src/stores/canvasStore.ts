@@ -3,67 +3,9 @@ import { persist } from 'zustand/middleware'
 import { temporal } from 'zundo'
 import type { CanvasNode, Connection, ToolMode, ViewState } from '../types/canvas'
 import { useTimelineStore } from './timelineStore'
-import { DEFAULT_VIDEO_MODEL } from '../utils/mlxDefaults'
-
-const defaultNodesBase: CanvasNode[] = [
-  {
-    id: 'n-demo-media',
-    type: 'media',
-    x: 80,
-    y: 120,
-    width: 280,
-    height: 200,
-    data: {
-      title: 'Sample image',
-      content:
-        'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
-      previewType: 'image',
-    },
-    settings: {},
-  },
-  {
-    id: 'n-gen-vid',
-    type: 'gen-video',
-    x: 420,
-    y: 100,
-    width: 320,
-    height: 260,
-    data: {
-      title: 'Video generation',
-      prompt: 'Short cinematic clip, golden hour',
-      previewType: 'video',
-      content: '',
-      model: DEFAULT_VIDEO_MODEL,
-      status: 'idle',
-      videoWidth: 512,
-      videoHeight: 512,
-      numFrames: 97,
-      fps: 24,
-      pipeline: 'distilled',
-      cfgScale: 3,
-      audioCfgScale: 7,
-      imageStrength: 1,
-      tiling: 'auto',
-    },
-    settings: {},
-  },
-  {
-    id: 'n-text',
-    type: 'text',
-    x: 120,
-    y: 380,
-    width: 240,
-    height: 120,
-    data: {
-      title: 'Note',
-      content: 'Connect this to a gen-video or gen-image node for prompt text.',
-    },
-    settings: {},
-  },
-]
 
 function cloneDefaultNodes(): CanvasNode[] {
-  return JSON.parse(JSON.stringify(defaultNodesBase)) as CanvasNode[]
+  return []
 }
 
 function stripRuntimeData(nodes: CanvasNode[]): CanvasNode[] {
@@ -253,12 +195,13 @@ export function guessMediaTypeFromNode(n: CanvasNode): 'video' | 'image' | 'audi
   if (/\.(png|jpe?g|gif|webp|bmp)$/.test(url)) return 'image'
   if (/\.(mp3|wav|ogg|m4a|aac|flac)$/.test(url)) return 'audio'
   if (n.type === 'gen-video') return 'video'
-  if (n.type === 'gen-image') return 'image'
+  if (n.type === 'gen-image' || n.type === 'gen-image-advanced') return 'image'
   return null
 }
 
 export {
   DEFAULT_IMAGE_MODEL,
+  DEFAULT_IMAGE_EDIT_MODEL,
   DEFAULT_VIDEO_MODEL,
   DEFAULT_CHAT_MODEL,
 } from '../utils/mlxDefaults'

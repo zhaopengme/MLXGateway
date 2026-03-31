@@ -1,5 +1,6 @@
 /** Defaults aligned with [MLXGateway README](../../README.md) */
 export const DEFAULT_IMAGE_MODEL = 'black-forest-labs/FLUX.2-klein-4B'
+export const DEFAULT_IMAGE_EDIT_MODEL = 'flux2-klein-4b-edit'
 export const DEFAULT_VIDEO_MODEL = 'prince-canuma/LTX-2.3-distilled'
 export const DEFAULT_CHAT_MODEL = 'mlx-community/Qwen3-4B-Instruct-2507-4bit'
 export const DEFAULT_TTS_MODEL = 'mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16'

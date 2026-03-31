@@ -110,6 +110,7 @@ export default function App() {
           onChange={setTimelineH}
           min={120}
           max={480}
+          invert
         />
         <TimelinePanel isDark={isDark} timelineHeight={timelineH} />
       </div>

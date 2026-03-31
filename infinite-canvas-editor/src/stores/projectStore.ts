@@ -22,22 +22,7 @@ export const useProjectStore = create(
   persist<ProjectState>(
     (set) => ({
       theme: 'dark',
-      history: [
-        {
-          id: 'h-sample-vid',
-          type: 'video',
-          url: 'https://www.w3schools.com/html/mov_bbb.mp4',
-          prompt: 'Sample Big Buck Bunny (demo)',
-          time: new Date().toISOString(),
-        },
-        {
-          id: 'h-sample-img',
-          type: 'image',
-          url: 'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=800&q=80',
-          prompt: 'Sample landscape',
-          time: new Date().toISOString(),
-        },
-      ],
+      history: [],
 
       setTheme: (theme) => set({ theme }),
 

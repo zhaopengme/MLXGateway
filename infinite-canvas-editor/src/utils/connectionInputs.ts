@@ -30,7 +30,7 @@ export function isImageLikeNode(n: CanvasNode): boolean {
   const c = n.data.content
   if (!c) return false
   if (n.data.previewType === 'video') return false
-  if (n.type === 'gen-image') return true
+  if (n.type === 'gen-image' || n.type === 'gen-image-advanced') return true
   if (n.type === 'media') {
     if (n.data.previewType === 'image') return true
     const base = c.split('?')[0].toLowerCase()

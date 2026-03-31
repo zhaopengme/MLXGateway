@@ -2,6 +2,7 @@ export type NodeKind =
   | 'media'
   | 'text'
   | 'gen-image'
+  | 'gen-image-advanced'
   | 'gen-video'
   | 'chat'
   | 'tts'

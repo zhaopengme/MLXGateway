@@ -8,6 +8,8 @@ type Props = {
   min?: number
   max?: number
   className?: string
+  /** Flip drag direction (use when resizing a *bottom* pane — dragging up grows it) */
+  invert?: boolean
 }
 
 /** Drag to resize: for horizontal divider, user drags vertically to change height of top/main area */
@@ -18,6 +20,7 @@ export function ResizableDivider({
   min = 120,
   max = 560,
   className = '',
+  invert = false,
 }: Props) {
   const dragging = useRef(false)
   const start = useRef(0)
@@ -48,7 +51,7 @@ export function ResizableDivider({
           if (!dragging.current) return
           const delta =
             direction === 'horizontal' ? ev.clientY - start.current : ev.clientX - start.current
-          const next = Math.min(max, Math.max(min, startVal.current + delta))
+          const next = Math.min(max, Math.max(min, startVal.current + (invert ? -delta : delta)))
           onChange(next)
         }
         const onUp = () => {
