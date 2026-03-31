@@ -15,7 +15,7 @@ import {
   getPromptFromIncoming,
   isImageLikeNode,
 } from '../../utils/connectionInputs'
-import { DEFAULT_CHAT_MODEL, DEFAULT_STT_MODEL, DEFAULT_TTS_MODEL } from '../../utils/mlxDefaults'
+import { DEFAULT_CHAT_MODEL, DEFAULT_STT_MODEL, DEFAULT_TTS_MODEL, framesToDuration } from '../../utils/mlxDefaults'
 import { getAudioDurationSec, getVideoDurationSec } from '../../utils/mediaDuration'
 import { AUDIO_TRACK_ID } from '../../types/timeline'
 
@@ -483,6 +483,11 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
             : isDark ? 'bg-sky-900/60 text-sky-300' : 'bg-sky-100 text-sky-700'
         }`}>
           {mode}
+        </span>
+        <span className={`flex items-center text-[9px] font-mono px-1.5 py-0.5 rounded ${
+          isDark ? 'bg-zinc-700/60 text-zinc-400' : 'bg-zinc-100 text-zinc-500'
+        }`}>
+          {framesToDuration(node.data.numFrames ?? 121, node.data.fps ?? 24).toFixed(1)}s {'\u00b7'} {node.data.numFrames ?? 121}f
         </span>
       </div>
       {frameRefs.length > 0 && (

@@ -9,8 +9,10 @@ import {
   DEFAULT_TTS_MODEL,
   DEFAULT_VIDEO_MODEL,
   IMAGE_SIZES,
-  VIDEO_NUM_FRAMES_OPTIONS,
+  VIDEO_DURATION_OPTIONS,
   VIDEO_PIPELINES,
+  durationToFrames,
+  framesToDuration,
 } from '../../utils/mlxDefaults'
 
 type Props = { isDark: boolean }
@@ -378,24 +380,41 @@ export function PropertiesPanel({ isDark }: Props) {
                   </label>
                 </div>
                 <label className="block space-y-1">
-                  <span className={isDark ? 'text-zinc-500' : 'text-zinc-500'}>num_frames</span>
-                  <select
-                    value={String(node.data.numFrames ?? 97)}
-                    onChange={(e) =>
-                      updateNode(node.id, {
-                        data: { ...node.data, numFrames: Number(e.target.value) },
-                      })
-                    }
-                    className={`w-full px-2 py-1.5 rounded border text-xs font-mono ${
-                      isDark ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-zinc-300'
-                    }`}
-                  >
-                    {VIDEO_NUM_FRAMES_OPTIONS.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
+                  <span className={isDark ? 'text-zinc-500' : 'text-zinc-500'}>Duration (s)</span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={(() => {
+                        const fps = node.data.fps ?? 24
+                        const frames = node.data.numFrames ?? 121
+                        const dur = framesToDuration(frames, fps)
+                        // Find closest duration option
+                        const closest = VIDEO_DURATION_OPTIONS.reduce((prev, curr) =>
+                          Math.abs(curr - dur) < Math.abs(prev - dur) ? curr : prev,
+                        )
+                        return String(closest)
+                      })()}
+                      onChange={(e) => {
+                        const sec = Number(e.target.value)
+                        const fps = node.data.fps ?? 24
+                        const frames = durationToFrames(sec, fps)
+                        updateNode(node.id, {
+                          data: { ...node.data, numFrames: frames },
+                        })
+                      }}
+                      className={`flex-1 px-2 py-1.5 rounded border text-xs ${
+                        isDark ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-zinc-300'
+                      }`}
+                    >
+                      {VIDEO_DURATION_OPTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {s}s
+                        </option>
+                      ))}
+                    </select>
+                    <span className={`text-[10px] font-mono shrink-0 ${isDark ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                      {'\u2192'} {node.data.numFrames ?? 121}f
+                    </span>
+                  </div>
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="block space-y-1">

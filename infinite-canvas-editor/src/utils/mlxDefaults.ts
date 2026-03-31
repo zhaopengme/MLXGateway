@@ -14,9 +14,26 @@ export const VIDEO_PIPELINES = [
   'dev-two-stage-hq',
 ] as const
 
-export const VIDEO_NUM_FRAMES_OPTIONS = [
-  9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121, 129, 137, 145, 153, 161, 169, 177,
-  185, 193, 201, 209, 217, 225, 233, 241, 249, 257,
-]
+/** Duration options in seconds for the video generation UI */
+export const VIDEO_DURATION_OPTIONS = [2, 3, 4, 5, 10, 15, 20] as const
+
+/**
+ * Convert a duration in seconds to a valid LTX-Video num_frames value.
+ * LTX requires num_frames = 8n + 1 (i.e. 9, 17, 25, … 257).
+ * Formula: raw = sec * fps + 1, then round to nearest 8n + 1.
+ */
+export function durationToFrames(sec: number, fps: number): number {
+  const raw = sec * fps + 1
+  const n = Math.round((raw - 1) / 8)
+  return Math.max(9, n * 8 + 1)
+}
+
+/**
+ * Convert a num_frames value back to duration in seconds.
+ * Formula: duration = (num_frames - 1) / fps
+ */
+export function framesToDuration(frames: number, fps: number): number {
+  return (frames - 1) / fps
+}
 
 export const IMAGE_SIZES = ['256x256', '512x512', '1024x1024', '1792x1024', '1024x1792'] as const

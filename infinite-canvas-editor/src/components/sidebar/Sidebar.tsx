@@ -240,7 +240,7 @@ export function Sidebar({ isDark }: Props) {
         status: 'idle',
         videoWidth: 512,
         videoHeight: 512,
-        numFrames: 97,
+        numFrames: 121,
         fps: 24,
         pipeline: 'distilled',
         cfgScale: 3,
