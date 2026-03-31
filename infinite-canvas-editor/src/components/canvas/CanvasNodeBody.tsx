@@ -1,5 +1,6 @@
 import { Loader2, MessageSquare, Mic, Send, SendToBack, Sparkles, Volume2 } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { toast } from 'sonner'
 import * as api from '../../api/gateway'
 import { EditImageModal } from '../EditImageModal'
 import { useCanvasStore, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../../stores/canvasStore'
@@ -140,9 +141,11 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
     const prompt = getPromptFromIncoming(incoming, node.data.prompt)
     if (!prompt.trim()) {
       updateNode(node.id, { data: { ...node.data, status: 'error', error: 'Prompt is empty' } })
+      toast.error('Prompt is empty')
       return
     }
     updateNode(node.id, { data: { ...node.data, status: 'generating', error: undefined } })
+    const loadingToast = toast.loading('Generating image…')
     try {
       const urls = await api.generateImage({
         model: node.data.model ?? DEFAULT_IMAGE_MODEL,
@@ -162,30 +165,33 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
         },
       })
       addHistoryItem({ type: 'image', url: first, prompt, label: node.data.title })
+      toast.dismiss(loadingToast)
+      toast.success('Image generated')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Generation failed'
       updateNode(node.id, { data: { ...node.data, status: 'error', error: msg } })
+      toast.dismiss(loadingToast)
+      toast.error(msg)
     }
   }
 
   const handleEditConfirm = async (count: number, editPrompts: string[]) => {
-    // 检查是否所有提示词都为空
     const hasAnyPrompt = editPrompts.some(p => p.trim()) || getPromptFromIncoming(incoming, node.data.prompt).trim()
     if (!hasAnyPrompt) {
       updateNode(node.id, { data: { ...node.data, status: 'error', error: 'Prompt is empty' } })
+      toast.error('Prompt is empty')
       return
     }
     updateNode(node.id, { data: { ...node.data, status: 'generating', error: undefined } })
+    const loadingToast = toast.loading('Editing image…')
     try {
       const files: File[] = []
       let i = 0
-      // 优先使用输入节点的图片
       for (const src of imageRefs) {
         const u = getImageUrlFromNode(src)
         if (!u) continue
         files.push(await urlToImageFile(u, `ref_${i++}.png`))
       }
-      // 如果没有输入节点，使用当前节点的图片
       if (!files.length && isImageUrl(node.data.content)) {
         files.push(await urlToImageFile(node.data.content!, `ref_${i++}.png`))
       }
@@ -194,7 +200,6 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
       const results: string[] = []
       const defaultPrompt = getPromptFromIncoming(incoming, node.data.prompt)
       for (let i = 0; i < count; i++) {
-        // 使用对应索引的提示词，如果没有则使用默认提示词
         const prompt = editPrompts[i]?.trim() || defaultPrompt
         if (!prompt) continue
         const urls = await api.editImage({
@@ -235,9 +240,13 @@ function GenImageBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
           error: undefined,
         },
       })
+      toast.dismiss(loadingToast)
+      toast.success(`Edited ${results.length} image(s)`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Edit failed'
       updateNode(node.id, { data: { ...node.data, status: 'error', error: msg } })
+      toast.dismiss(loadingToast)
+      toast.error(msg)
     }
   }
 
@@ -345,9 +354,11 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
     const prompt = getPromptFromIncoming(incoming, node.data.prompt)
     if (!prompt.trim()) {
       updateNode(node.id, { data: { ...node.data, status: 'error', error: 'Prompt is empty' } })
+      toast.error('Prompt is empty')
       return
     }
     updateNode(node.id, { data: { ...node.data, status: 'generating', error: undefined } })
+    const loadingToast = toast.loading('Generating video…')
     try {
       const imgs = incoming.filter(isImageLikeNode).map(getImageUrlFromNode).filter(Boolean) as string[]
       const ttsNode = incoming.find((n) => n.type === 'tts' && n.data.audioBlobUrl)
@@ -386,9 +397,13 @@ function GenVideoBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
         },
       })
       addHistoryItem({ type: 'video', url, prompt, label: node.data.title })
+      toast.dismiss(loadingToast)
+      toast.success('Video generated')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Video generation failed'
       updateNode(node.id, { data: { ...node.data, status: 'error', error: msg } })
+      toast.dismiss(loadingToast)
+      toast.error(msg)
     }
   }
 
@@ -543,6 +558,7 @@ function ChatNodeBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
           chatPartial: undefined,
         },
       })
+      toast.error(msg)
     } finally {
       setStreaming(false)
       scrollBottom()
@@ -637,9 +653,11 @@ function TtsNodeBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
       updateNode(node.id, {
         data: { ...node.data, audioBlobUrl: url, status: 'done', error: undefined },
       })
+      toast.success('Audio generated')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'TTS failed'
       updateNode(node.id, { data: { ...node.data, status: 'error', error: msg } })
+      toast.error(msg)
     } finally {
       setBusy(false)
     }
@@ -717,9 +735,11 @@ function SttNodeBody({ node, isDark }: { node: NodeType; isDark: boolean }) {
       updateNode(node.id, {
         data: { ...node.data, transcribedText: t, status: 'done', content: t },
       })
+      toast.success('Transcription complete')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'STT failed'
       updateNode(node.id, { data: { ...node.data, status: 'error', error: msg } })
+      toast.error(msg)
     } finally {
       setBusy(false)
     }

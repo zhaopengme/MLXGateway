@@ -5,7 +5,6 @@ import random
 import threading
 import time
 import uuid
-from pathlib import Path
 from typing import Dict, List
 
 from ..utils.logger import logger
@@ -45,6 +44,9 @@ def _resolve_model_class(model_version: str):
 def _resolve_edit_class(model_version: str):
     normalized = _normalize_model_name(model_version)
 
+    if "flux2-klein" in normalized:
+        from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
+        return Flux2KleinEdit
     if "flux2" in normalized and "edit" in normalized:
         from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
         return Flux2KleinEdit
@@ -65,6 +67,10 @@ def _resolve_edit_class(model_version: str):
 def _build_init_kwargs(model_version: str, params: dict) -> dict:
     init_kwargs = {"quantize": params.get("quantize", 8)}
     normalized = _normalize_model_name(model_version)
+    if "flux2-klein-4b" in normalized or ("flux2-klein" in normalized and "4b" in normalized):
+        from mflux.models.common.config.model_config import ModelConfig
+        init_kwargs["model_config"] = ModelConfig.flux2_klein_4b()
+        logger.info("Using FLUX.2-klein-4B model config")
     if "flux2-klein-9b" in normalized or ("flux2-klein" in normalized and "9b" in normalized):
         from mflux.models.common.config.model_config import ModelConfig
         init_kwargs["model_config"] = ModelConfig.flux2_klein_9b()
@@ -75,6 +81,7 @@ def _build_init_kwargs(model_version: str, params: dict) -> dict:
             init_kwargs[clean] = params[key]
         elif clean in params:
             init_kwargs[clean] = params[clean]
+
     return init_kwargs
 
 

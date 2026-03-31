@@ -88,8 +88,24 @@ huggingface-cli download unsloth/Qwen3-8B-GGUF \
 
 ### Chat Completions
 
+Use **`POST`** (shown explicitly below). Replace `token` with the same value as **`API_KEY`** in `.env` when the gateway has auth enabled.
+
+**Non-streaming** — response body is a single JSON object (easiest for `curl` / `jq`):
+
 ```bash
-curl http://localhost:8008/v1/chat/completions \
+curl -X POST http://localhost:8008/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer token" \
+  -d '{
+    "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+**Streaming** — response is **SSE** (`text/event-stream`): multiple lines starting with `data: { ... }`, not one JSON document. Use **`curl -N`** so chunks are not buffered:
+
+```bash
+curl -N -X POST http://localhost:8008/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
@@ -99,27 +115,28 @@ curl http://localhost:8008/v1/chat/completions \
   }'
 ```
 
+Models whose `config.json` includes vision (e.g. **`mlx-community/Qwen3.5-9B-MLX-4bit`**) are loaded with **`mlx-vlm`**; plain text messages are still valid.
+
 ### Chat with a GGUF Model
 
-GGUF models are identified automatically by repo name or file suffix. No extra setup is needed — the first request downloads and caches the model.
+GGUF support currently applies to chat/LLM requests only. GGUF models are identified automatically by repo name or file suffix. No extra setup is needed — the first request downloads and caches the model.
 
 **Auto-select quantization from HF repo (picks Q4_K_M by default):**
 
 ```bash
-curl http://localhost:8008/v1/chat/completions \
+curl -X POST http://localhost:8008/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
     "model": "unsloth/Qwen3-8B-GGUF",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": true
+    "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
 **Pin a specific quantization level:**
 
 ```bash
-curl http://localhost:8008/v1/chat/completions \
+curl -X POST http://localhost:8008/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
@@ -131,7 +148,7 @@ curl http://localhost:8008/v1/chat/completions \
 **Use a local GGUF file:**
 
 ```bash
-curl http://localhost:8008/v1/chat/completions \
+curl -X POST http://localhost:8008/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \
   -d '{
@@ -210,16 +227,28 @@ curl -X POST http://localhost:8008/v1/images/generations \
 
 ### Image Editing
 
-Upload one or more source images and a prompt to create edited images:
+Upload one or more source images and a prompt to create edited images. The default response is a `url` to a generated file under `static/`; pass `response_format=b64_json` if you want inline data.
 
 ```bash
 curl -X POST http://localhost:8008/v1/images/edits \
   -H "Authorization: Bearer token" \
   -F "prompt=Make it look like a watercolor painting" \
   -F "model=flux2-klein-9b-edit" \
-  -F "image[]=@source.png" \
-  -F "response_format=b64_json"
+  -F "image[]=@source.png"
 ```
+
+**Multiple references (FLUX.2 Klein 4B edit)** — combine several images into one result:
+
+```bash
+curl -X POST http://localhost:8008/v1/images/edits \
+  -H "Authorization: Bearer token" \
+  -F "prompt=Combine these references into one polished image" \
+  -F "model=flux2-klein-4b-edit" \
+  -F "image[]=@ref1.png" \
+  -F "image[]=@ref2.png"
+```
+
+`/v1/images/edits` supports both `flux2-klein-4b-edit` and `flux2-klein-9b-edit`. You can also point `model_path` at a local `black-forest-labs/FLUX.2-klein-4B` or `black-forest-labs/FLUX.2-klein-9B` checkout.
 
 ### Video Generation
 
@@ -388,3 +417,9 @@ Visit [http://127.0.0.1:8008/docs](http://127.0.0.1:8008/docs) after starting th
 ## Contributing
 
 Issues and Pull Requests are welcome!
+
+
+
+```
+pip install --no-deps -e .
+```

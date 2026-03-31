@@ -27,7 +27,7 @@ class ImageGenerationRequest(BaseModel):
     prompt: str = Field(..., max_length=4000)
     model: str = "black-forest-labs/FLUX.2-klein-4B"
     n: int = Field(default=1, ge=1, le=10)
-    response_format: ResponseFormat = ResponseFormat.B64_JSON
+    response_format: ResponseFormat = ResponseFormat.URL
     output_format: OutputFormat = OutputFormat.WEBP
     quality: Optional[int] = Field(default=80, ge=1, le=100)
     size: ImageSize = ImageSize.S1024x1024
@@ -52,9 +52,9 @@ class ImageGenerationResponse(BaseModel):
 
 class ImageEditRequest(BaseModel):
     prompt: str = Field(..., max_length=32000)
-    model: str = "flux2-klein-9b-edit"
+    model: str = "flux2-klein-4b-edit"
     n: int = Field(default=1, ge=1, le=10)
-    response_format: ResponseFormat = ResponseFormat.B64_JSON
+    response_format: ResponseFormat = ResponseFormat.URL
     size: Optional[str] = None  # Auto-detect from input if not provided
     
     # Image handling (populated from form data)

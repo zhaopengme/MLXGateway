@@ -1,5 +1,6 @@
 import { Moon, Server, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Toaster } from 'sonner'
 import { ImageEditModal } from './components/ImageEditModal'
 import { InfiniteCanvas } from './components/canvas/InfiniteCanvas'
 import { PreviewMonitor } from './components/timeline/PreviewMonitor'
@@ -8,12 +9,14 @@ import { ResizableDivider } from './components/shared/ResizableDivider'
 import { GatewaySettingsPanel } from './components/settings/GatewaySettingsPanel'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { TimelinePanel } from './components/timeline/TimelinePanel'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useGatewayStore } from './stores/gatewayStore'
 import { useProjectStore } from './stores/projectStore'
 
 const TIMELINE_H_KEY = 'infinite-canvas-timeline-h'
 
 export default function App() {
+  useKeyboardShortcuts()
   const theme = useProjectStore((s) => s.theme)
   const setTheme = useProjectStore((s) => s.setTheme)
   const connected = useGatewayStore((s) => s.connected)
@@ -110,6 +113,12 @@ export default function App() {
         />
         <TimelinePanel isDark={isDark} timelineHeight={timelineH} />
       </div>
+      <Toaster
+        position="top-center"
+        expand={false}
+        richColors
+        closeButton
+      />
     </div>
   )
 }

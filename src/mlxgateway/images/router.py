@@ -82,7 +82,7 @@ async def edit_image(
     prompt: str = Form(...),
     model: Optional[str] = Form(default="flux2-klein-9b-edit"),
     size: Optional[str] = Form(default=None),
-    response_format: Optional[str] = Form(default="b64_json"),
+    response_format: Optional[str] = Form(default="url"),
     n: Optional[int] = Form(default=1),
     steps: Optional[int] = Form(default=None),
     guidance: Optional[float] = Form(default=None),
@@ -95,13 +95,13 @@ async def edit_image(
     Creates an edited image given one or more source images and a prompt.
 
     Compatible with OpenAI Images API /v1/images/edits endpoint.
-    Supports FLUX.2, Qwen Edit, and Kontext editing models.
+    Supports FLUX.2 Klein 4B/9B, Qwen Edit, and Kontext editing models.
 
     Args:
         prompt: Text description of desired edits (max 32000 characters)
         image: One or more images to edit (up to 16 for FLUX.2)
         mask: Optional mask for DALL-E 2 compatibility (not used by mflux models)
-        model: Model to use (flux2-klein-9b-edit, qwen-edit, kontext, gpt-image-1.5)
+        model: Model to use (flux2-klein-4b-edit, flux2-klein-9b-edit, qwen-edit, kontext, gpt-image-1.5)
         n: Number of images to generate (1-10)
         size: Output size (e.g. "1024x1024"), auto-detects from input if not provided
         response_format: "url" or "b64_json"
@@ -109,7 +109,7 @@ async def edit_image(
         guidance: Guidance scale (default 2.5 for editing)
         seed: Random seed for reproducibility
         quantize: Quantization level (4 or 8, default 8)
-        model_path: Path to local GGUF model file (for qwen-edit models)
+        model_path: Path to local model weights or model directory understood by mflux
     """
     temp_dir = None
     temp_files = []
