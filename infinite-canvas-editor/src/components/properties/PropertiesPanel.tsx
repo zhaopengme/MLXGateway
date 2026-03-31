@@ -422,9 +422,18 @@ export function PropertiesPanel({ isDark }: Props) {
                     <input
                       type="number"
                       value={node.data.fps ?? 24}
-                      onChange={(e) =>
-                        updateNode(node.id, { data: { ...node.data, fps: Number(e.target.value) } })
-                      }
+                      onChange={(e) => {
+                        const newFps = Number(e.target.value)
+                        if (!Number.isFinite(newFps) || newFps <= 0) return
+                        const oldFps = node.data.fps ?? 24
+                        const oldFrames = node.data.numFrames ?? 121
+                        // Preserve the user's chosen duration when fps changes
+                        const dur = framesToDuration(oldFrames, oldFps)
+                        const newFrames = durationToFrames(dur, newFps)
+                        updateNode(node.id, {
+                          data: { ...node.data, fps: newFps, numFrames: newFrames },
+                        })
+                      }}
                       className={`w-full px-2 py-1 rounded border text-xs ${
                         isDark ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-zinc-300'
                       }`}
